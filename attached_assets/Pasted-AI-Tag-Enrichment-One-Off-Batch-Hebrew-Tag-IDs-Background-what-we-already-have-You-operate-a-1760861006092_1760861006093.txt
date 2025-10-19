@@ -1,0 +1,339 @@
+AI Tag Enrichment — One-Off Batch (Hebrew, Tag IDs)
+Background (what we already have)
+
+You operate a service with a Postgres table enriched_lectures containing lectures and metadata. Key fields for us:
+
+id, lecture_external_id, lecture_title, lecture_description,
+
+plus other fields we do not need to modify in Phase-1.
+
+Many lectures lack tags (lecture_tags, lecture_tag_ids). We want to suggest tags (not write them back yet).
+
+Tags are Hebrew and ID-based (not free-text). You supply a canonical tags CSV (blacklist already removed).
+
+This is a one-time batch, not a long-running service. We will only read the source table; output goes to CSV and/or a new suggestions table.
+
+Later (Phase-2) you’ll add a human approval flow and optionally push accepted tags to Airtable via API.
+
+Scope (Phase-1)
+
+Inputs
+
+Postgres (read-only): enriched_lectures → use lecture_title, lecture_description, id, lecture_external_id. Filter: is_active = true AND soft_deleted = false.
+
+CSV tag catalog (blacklist already filtered): columns (case-insensitive) tag_id, name_he, optional synonyms_he.
+
+(Optional but recommended) A sample of already-tagged lectures (to learn from your historical tagging).
+
+Process
+
+Compute embeddings on full lecture content (title+description) in Hebrew.
+
+Use your existing tagged lectures to build per-tag prototypes (centroids).
+
+Score new lectures against prototypes; calibrate per-tag thresholds for high precision.
+
+(Optional) LLM arbiter re-ranks/filters top candidates using Structured Outputs (IDs-only JSON).
+
+Outputs
+
+CSV tag_suggestions.csv with: lecture_id, lecture_external_id, tag_id, tag_name_he, score, rationale, model.
+
+(Optional) Postgres table lecture_tag_suggestions for later review UI.
+
+Non-Goals
+
+No writeback to main lecture_tags yet. No Airtable calls in Phase-1.
+
+Functional Requirements (MoSCoW)
+
+Must
+
+Read Hebrew content and tag IDs (from CSV).
+
+Suggest 3–7 tags per lecture where confidence warrants it; include a score (0–1) and short rationale.
+
+Be deterministic/idempotent: unique per (lecture_id, tag_id).
+
+Use read-only access to source DB; no changes to enriched_lectures.
+
+Run as a batch and produce CSV; ability to also write to lecture_tag_suggestions if enabled.
+
+Should
+6. Recompute embeddings in a single consistent vector space (lectures and tag labels) to avoid model mismatch.
+7. Exploit existing tagged lectures to learn “what we usually mean” for each tag.
+8. Support LLM arbitration on borderline cases with JSON-Schema-validated outputs (IDs only).
+
+Could
+9. Use synonyms from CSV.
+10. Emit a simple QA report (counts, histograms, precision@K sample).
+
+Won’t (Phase-1)
+11. No Airtable writeback; that’s Phase-2 (approval UI + API).
+
+Non-Functional Requirements
+
+Precision over recall: default thresholds target high precision (fewer but strong suggestions).
+
+Security: all secrets via environment variables / secret manager; never log secrets; rotate any leaked keys.
+
+Performance: batchable; embeddings and LLM calls amortized via batching where possible (OpenAI Batch API recommended for embeddings). 
+OpenAI Platform
++1
+
+Cost: embeddings first; LLM only on a small candidate list.
+
+Method (the mechanism)
+1) Representation (Embeddings)
+
+Build a single text string per lecture:
+"[כותרת] {lecture_title}\n[תיאור] {lecture_description}"
+(No search_text; you said title+description cover it.)
+
+Compute embeddings for:
+
+Lectures (all active, non-deleted).
+
+Tag labels (each tag: "תגית: {name_he} | נרדפות: {synonyms_he}").
+
+Model: text-embedding-3-large (strong multilingual performance, recommended for non-English). 
+OpenAI Platform
++2
+OpenAI Platform
++2
+
+API: OpenAI Embeddings API; for one-off scale, prefer the Batch API to upload a file of requests and process asynchronously for better price/perf. 
+OpenAI Platform
++2
+OpenAI Platform
++2
+
+2) Learn from your existing tagging (Prototype-kNN)
+
+For each tag t, collect all positive lectures (already tagged with t).
+
+Compute centroid: c_t = mean(v_lecture for positives of t) (optionally multiple centroids if the tag is multimodal).
+
+For a new lecture vector v, compute similarity: s_t = cosine(v, c_t) for every tag t.
+
+3) Handle low-data tags (Label similarity)
+
+For tags with < N positive examples (e.g., N=5), blend in similarity to the tag-label embedding:
+
+z_t = cosine(v, v_tag_label).
+
+Final raw score: raw_t = 0.8*s_t + 0.2*z_t (tuneable).
+
+4) Per-tag calibration (Precision-first)
+
+Split existing tagged lectures into train/holdout (e.g., 80/20).
+
+For each tag, fit a threshold τ_t to achieve target precision (e.g., 90%) on the holdout.
+
+During batch, keep t only if raw_t ≥ τ_t.
+
+5) LLM arbiter (adds deep reading, only where useful)
+
+Take the top 10–20 candidate tags by raw_t (post-threshold, or near-threshold cases).
+
+Ask the LLM to select relevant tag IDs from this candidate set using Structured Outputs (JSON-Schema enforced).
+
+Use OpenAI Structured Outputs so the model must return a JSON object with selected_tag_ids: string[]. 
+OpenAI Platform
++1
+
+Keep only IDs returned by the arbiter for borderline cases (e.g., 0.55–0.70). For high-confidence (e.g., ≥0.80), you can skip LLM to save cost.
+
+Arbiter call details
+
+System (cacheable): instruct the model (in Hebrew) to return IDs only and to prefer precision (return empty list if unsure).
+
+User: include the lecture title+description and a compact list: candidate_id -> שם.
+
+Response format: JSON Schema requiring {"selected_tag_ids": ["<id>", ...]} to avoid parsing ambiguity (supported in Responses / Chat Completions APIs). 
+OpenAI Platform
++1
+
+6) Finalize suggestions
+
+Merge (prototype score + label similarity; plus LLM selection when applied).
+
+Keep top K=3–7 per lecture with final score ≥ 0.65.
+
+Rationale: short Hebrew string such as:
+
+“דמיון גבוה להרצאות שתוייגו ב־‘חדשנות’ (שכנים: 12345, 67890)”
+
+plus 1–2 top keywords that triggered Stage-A, if any.
+
+Data & Storage
+Tags CSV (input)
+
+Required: tag_id, name_he
+
+Optional: synonyms_he (delimiter: , | or ;)
+
+Blacklist: already removed on your side (no extra logic needed here).
+
+Suggestions table (optional, for review UI later)
+CREATE TABLE IF NOT EXISTS lecture_tag_suggestions (
+  suggestion_id       BIGSERIAL PRIMARY KEY,
+  lecture_id          BIGINT NOT NULL REFERENCES enriched_lectures(id) ON DELETE CASCADE,
+  lecture_external_id VARCHAR NOT NULL,
+  tag_id              VARCHAR NOT NULL,
+  tag_name_he         VARCHAR NOT NULL,
+  score               NUMERIC(5,4) NOT NULL,
+  rationale           TEXT,
+  sources             JSONB DEFAULT '["title","description"]',
+  model               TEXT NOT NULL,              -- "keyword+proto" or "proto+llm:<model>"
+  status              VARCHAR NOT NULL DEFAULT 'pending', -- for Phase-2 approvals
+  created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (lecture_id, tag_id)
+);
+
+Files (always produced)
+
+tag_suggestions.csv with:
+lecture_id, lecture_external_id, tag_id, tag_name_he, score, rationale, model
+
+OpenAI API usage (exactly what to call)
+1) Embeddings
+
+Model: text-embedding-3-large.
+
+Why: Best multilingual embedding model; recommended for non-English (Hebrew) similarity/search tasks. 
+OpenAI Platform
++2
+OpenAI Platform
++2
+
+Endpoints:
+
+Standard Embeddings API (/v1/embeddings) for smaller runs. 
+OpenAI Platform
+
+Batch API for large one-off embedding runs; submit a file and retrieve results asynchronously (often cheaper/less disruptive to live quotas). 
+OpenAI Platform
++1
+
+Batch sizing: ~512–1024 inputs per request for standard; with Batch API, follow the examples (one file with many inputs).
+
+2) LLM Arbiter (structured, IDs-only)
+
+Feature: Structured Outputs with JSON Schema — forces schema-valid JSON, avoids free-text parsing. 
+OpenAI Platform
++1
+
+Payload:
+
+System: Hebrew instructions (precision first).
+
+User: title, description, candidate list (id -> שם).
+
+Response schema: { selected_tag_ids: string[] }.
+
+Models: any reasoning-capable chat model you’re comfortable with; keep temperature 0; short max tokens.
+
+Security & Config
+
+Never hardcode secrets. Use env vars:
+
+DATABASE_URL=postgres://<ro-user>:<pwd>@<host>:5432/<db>
+
+OPENAI_API_KEY=...
+
+TAGS_CSV_PATH=/path/to/tags.csv
+
+OUTPUT_CSV_PATH=/path/to/tag_suggestions.csv
+
+USE_LLM=true|false
+
+Use read-only DB user for Neon. If you choose DB output, give the batch user write to only the lecture_tag_suggestions table (or a separate schema).
+
+Rotate any credentials that were shared in plaintext previously.
+
+Implementation Plan (step-by-step)
+
+Ingest
+
+Load the tags CSV (normalize headers).
+
+Load active, non-deleted lectures from Postgres: id, lecture_external_id, title, description.
+
+Preprocess
+
+Hebrew normalization for keyword extraction only (remove niqqud/punctuation, lowercase).
+(Embeddings should use the raw text; normalization is optional there.)
+
+Embeddings
+
+Build lecture texts ([כותרת] … [תיאור] …) and tag label texts (תגית: … | נרדפות: …).
+
+Compute embeddings (Batch API if large). Store locally for this run. 
+OpenAI Platform
+
+Prototype-kNN
+
+From your already-tagged lectures (if provided), compute tag centroids; save per-tag c_t (+ optional sub-centroids for multimodal tags).
+
+Score each new lecture: s_t = cosine(v, c_t).
+
+Low-data tags blending
+
+Compute z_t = cosine(v, v_tag_label) for tags with <5 examples.
+
+raw_t = 0.8*s_t + 0.2*z_t (tuneable).
+
+Per-tag thresholding
+
+Fit τ_t on holdout to target 90% precision. Keep tags with raw_t ≥ τ_t.
+
+LLM arbiter (optional ON by default)
+
+For each lecture, pick up to 20 candidates around threshold.
+
+Call LLM with Structured Outputs (IDs only). Keep only IDs it selects for borderline cases; skip LLM for ≥0.80 confidence. 
+OpenAI Platform
+
+Finalize & persist
+
+Keep top 3–7 tags, score ≥0.65.
+
+Store rationale: neighbor lecture IDs or “closest tag label” and any strong keyword hits.
+
+Emit CSV; (optionally) upsert into lecture_tag_suggestions.
+
+QA
+
+Sample 50 lectures from diverse topics; compute precision@3 and % with ≥1 suggestion.
+
+Review rationales; adjust K and thresholds; re-run if needed.
+
+Milestones
+
+Day 1–2 — Data ingest + embeddings pipeline (lectures & tags).
+
+Day 3 — Prototype-kNN + per-tag thresholds; CSV output.
+
+Day 4 — QA pass on sample; adjust thresholds/K.
+
+Day 5 — LLM arbiter with Structured Outputs; second QA. 
+OpenAI Platform
+
+Day 6 — Full run + final artifacts; optional DB suggestions table.
+
+Evaluation (“Are we good?”)
+
+Quantitative
+
+precision@3 on a human-judged sample ≥ 70% (target).
+
+≥ 90% of lectures have ≥1 valid suggestion.
+
+No blacklisted tags in output (you pre-filtered CSV).
+
+Qualitative
+
+Rationales make sense (nearest neighbors or label semantics).
+
+Suggestions “sound like us” (mirror existing tagging style).
