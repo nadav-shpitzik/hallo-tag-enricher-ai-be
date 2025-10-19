@@ -32,6 +32,20 @@ class LectureScorer:
             
             scores = self.prototype_knn.score_lecture(embedding, tag_embeddings)
             
+            existing_tag_ids = set()
+            raw_tags = lecture.get('lecture_tag_ids', [])
+            if raw_tags:
+                if isinstance(raw_tags, str):
+                    existing_tag_ids = {t.strip() for t in raw_tags.split(',') if t.strip()}
+                elif isinstance(raw_tags, list):
+                    existing_tag_ids = {str(t).strip() for t in raw_tags if t}
+                else:
+                    logger.warning(f"Unexpected type for lecture_tag_ids: {type(raw_tags)}")
+            
+            for tag_id in list(existing_tag_ids):
+                if tag_id in scores:
+                    del scores[tag_id]
+            
             if self.config.use_llm and llm_arbiter and scores:
                 llm_selected = llm_arbiter.refine_suggestions(
                     lecture.get('lecture_title', ''),
