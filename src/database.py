@@ -107,8 +107,14 @@ class DatabaseConnection:
             return [dict(row) for row in cursor.fetchall()]
     
     def update_suggestion_status(self, suggestion_id: int, new_status: str, 
-                                 actor: Optional[str] = None) -> bool:
-        """Update suggestion status and create audit event."""
+                                 actor: Optional[str] = None, 
+                                 expected_status: Optional[str] = None) -> tuple[bool, Optional[str]]:
+        """
+        Update suggestion status and create audit event.
+        
+        Returns:
+            (success: bool, current_status: str|None) - success=False if row not found or status mismatch
+        """
         if not self.connection:
             raise RuntimeError("Database connection not established")
         
@@ -120,29 +126,46 @@ class DatabaseConnection:
             """, (suggestion_id,))
             row = cursor.fetchone()
             if not row:
-                return False
+                return (False, None)
             
             previous_status = row['status']
             
-            # Update status with approval metadata
+            # Validate expected status if provided (for concurrency safety)
+            if expected_status and previous_status != expected_status:
+                logger.warning(f"Status mismatch for suggestion {suggestion_id}: expected {expected_status}, got {previous_status}")
+                return (False, previous_status)
+            
+            # Update status with approval metadata, including previous status in WHERE clause for atomicity
             if new_status == 'approved':
                 cursor.execute("""
                     UPDATE lecture_tag_suggestions
                     SET status = %s, approved_by = %s, approved_at = CURRENT_TIMESTAMP
-                    WHERE suggestion_id = %s
-                """, (new_status, actor, suggestion_id))
+                    WHERE suggestion_id = %s AND status = %s
+                """, (new_status, actor, suggestion_id, previous_status))
             elif new_status == 'synced':
                 cursor.execute("""
                     UPDATE lecture_tag_suggestions
                     SET status = %s, synced_at = CURRENT_TIMESTAMP
-                    WHERE suggestion_id = %s
-                """, (new_status, suggestion_id))
+                    WHERE suggestion_id = %s AND status = %s
+                """, (new_status, suggestion_id, previous_status))
             else:
                 cursor.execute("""
                     UPDATE lecture_tag_suggestions
                     SET status = %s
+                    WHERE suggestion_id = %s AND status = %s
+                """, (new_status, suggestion_id, previous_status))
+            
+            # Check if the update actually affected a row
+            if cursor.rowcount == 0:
+                # Concurrent change occurred - re-query to get the actual current status
+                cursor.execute("""
+                    SELECT status FROM lecture_tag_suggestions
                     WHERE suggestion_id = %s
-                """, (new_status, suggestion_id))
+                """, (suggestion_id,))
+                row = cursor.fetchone()
+                actual_status = row['status'] if row else None
+                logger.warning(f"Update failed for suggestion {suggestion_id}: status changed concurrently to {actual_status}")
+                return (False, actual_status)
             
             # Create audit event - map status to allowed actions
             action_map = {
@@ -156,7 +179,7 @@ class DatabaseConnection:
             
             self.connection.commit()
             logger.info(f"Updated suggestion {suggestion_id}: {previous_status} -> {new_status}")
-            return True
+            return (True, new_status)  # Return the new status on success
     
     def enqueue_for_sync(self, suggestion_id: int) -> None:
         """Add a suggestion to the Airtable sync queue."""

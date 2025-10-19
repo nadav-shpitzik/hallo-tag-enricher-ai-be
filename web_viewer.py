@@ -3,6 +3,7 @@
 Web-based viewer for tag suggestions with filters.
 """
 import os
+import sys
 import json
 import pandas as pd
 import psycopg2
@@ -11,6 +12,10 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for
 import subprocess
 import threading
 from dotenv import load_dotenv
+
+# Add src directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+from database import DatabaseConnection
 
 load_dotenv()
 
@@ -180,6 +185,105 @@ def get_lecture(lecture_id):
         'lecture': lecture,
         'suggestions': suggestions.to_dict('records')
     })
+
+@app.route('/api/approve/<int:suggestion_id>', methods=['POST'])
+def approve_suggestion(suggestion_id):
+    """Approve a single suggestion (pending -> approved only)."""
+    try:
+        actor = request.json.get('actor', 'web_user') if request.json else 'web_user'
+        
+        with DatabaseConnection(os.getenv('DATABASE_URL')) as db:
+            # Attempt update with expected status check
+            success, current_status = db.update_suggestion_status(
+                suggestion_id, 'approved', actor, expected_status='pending'
+            )
+            
+            if success:
+                return jsonify({'status': 'approved', 'suggestion_id': suggestion_id})
+            elif current_status is None:
+                return jsonify({'error': 'Suggestion not found'}), 404
+            else:
+                return jsonify({
+                    'error': f"Cannot approve: suggestion is '{current_status}', expected 'pending'",
+                    'current_status': current_status
+                }), 409
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/reject/<int:suggestion_id>', methods=['POST'])
+def reject_suggestion(suggestion_id):
+    """Reject a single suggestion (pending -> rejected only)."""
+    try:
+        actor = request.json.get('actor', 'web_user') if request.json else 'web_user'
+        
+        with DatabaseConnection(os.getenv('DATABASE_URL')) as db:
+            # Attempt update with expected status check
+            success, current_status = db.update_suggestion_status(
+                suggestion_id, 'rejected', actor, expected_status='pending'
+            )
+            
+            if success:
+                return jsonify({'status': 'rejected', 'suggestion_id': suggestion_id})
+            elif current_status is None:
+                return jsonify({'error': 'Suggestion not found'}), 404
+            else:
+                return jsonify({
+                    'error': f"Cannot reject: suggestion is '{current_status}', expected 'pending'",
+                    'current_status': current_status
+                }), 409
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bulk_approve', methods=['POST'])
+def bulk_approve():
+    """Bulk approve suggestions for a lecture, optionally filtered by minimum score."""
+    try:
+        data = request.json
+        lecture_id = data.get('lecture_id')
+        min_score = data.get('min_score', 0.0)
+        actor = data.get('actor', 'web_user')
+        
+        if not lecture_id:
+            return jsonify({'error': 'lecture_id is required'}), 400
+        
+        with DatabaseConnection(os.getenv('DATABASE_URL')) as db:
+            # Get all pending suggestions for this lecture
+            with db.connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute("""
+                    SELECT suggestion_id, score 
+                    FROM lecture_tag_suggestions
+                    WHERE lecture_id = %s AND status = 'pending' AND score >= %s
+                """, (lecture_id, min_score))
+                
+                suggestions_to_approve = cursor.fetchall()
+            
+            if not suggestions_to_approve:
+                return jsonify({'message': 'No pending suggestions found matching criteria', 'approved_count': 0})
+            
+            # Approve each suggestion with expected status check
+            approved_count = 0
+            skipped_count = 0
+            for suggestion in suggestions_to_approve:
+                success, _ = db.update_suggestion_status(
+                    suggestion['suggestion_id'], 'approved', actor, expected_status='pending'
+                )
+                if success:
+                    approved_count += 1
+                else:
+                    skipped_count += 1
+            
+            return jsonify({
+                'status': 'success',
+                'approved_count': approved_count,
+                'skipped_count': skipped_count,
+                'lecture_id': lecture_id,
+                'min_score': min_score
+            })
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/rerun', methods=['POST'])
 def rerun_batch():
