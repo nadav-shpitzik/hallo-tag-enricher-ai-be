@@ -191,7 +191,8 @@ def index():
     
     lectures_data.sort(key=lambda x: x['lecture_id'])
     
-    unique_tags = sorted(suggestions_df['tag_name_he'].unique().tolist())
+    # Filter out NaN values before sorting
+    unique_tags = sorted([tag for tag in suggestions_df['tag_name_he'].unique().tolist() if pd.notna(tag)])
     
     # Calculate status-based statistics
     status_counts = suggestions_df['status'].value_counts().to_dict()
