@@ -97,9 +97,9 @@ def load_data():
     print(f"Loaded {len(suggestions_df)} suggestions for {len(lectures_cache)} lectures from database")
     return True
 
-@app.route('/')
-def index():
-    """Main page with all suggestions."""
+@app.route('/lectures')
+def lectures_view():
+    """Lecture-centric view with all suggestions."""
     # Reload data on each request to show latest status
     load_data()
     
@@ -336,9 +336,9 @@ def bulk_approve():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/lecturers')
-def lecturers_view():
-    """Lecturer-centric view: groups suggestions by lecturer."""
+@app.route('/')
+def index():
+    """Main page: Lecturer-centric view with grouped suggestions."""
     load_data()
     
     if suggestions_df is None or suggestions_df.empty:
@@ -472,6 +472,63 @@ def lecturers_view():
     }
     
     return render_template('lecturers.html', lecturers=lecturers_list, stats=stats)
+
+@app.route('/api/sync_airtable', methods=['POST'])
+def sync_airtable():
+    """Trigger Airtable sync in background."""
+    def run_sync():
+        print("\n" + "="*80)
+        print("🔄 AIRTABLE SYNC TRIGGERED FROM WEB INTERFACE")
+        print("="*80)
+        print(f"⏰ Started at: {pd.Timestamp.now()}")
+        print("📊 Syncing approved suggestions to Airtable...")
+        print("="*80 + "\n")
+        
+        try:
+            process = subprocess.Popen(
+                ['python', 'sync_to_airtable.py'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+            
+            for line in process.stdout:
+                print(line, end='', flush=True)
+            
+            process.wait(timeout=300)
+            
+            print("\n" + "="*80)
+            print(f"✅ Sync completed with exit code: {process.returncode}")
+            print(f"⏰ Finished at: {pd.Timestamp.now()}")
+            print("="*80 + "\n")
+            
+            if process.returncode == 0:
+                print("🔄 Reloading data into web viewer...")
+                load_data()
+                print("✅ Data reloaded successfully!")
+            else:
+                print(f"❌ Sync failed with exit code: {process.returncode}")
+                
+        except subprocess.TimeoutExpired:
+            print("\n" + "="*80)
+            print("⚠️ Sync timed out after 5 minutes")
+            print("="*80 + "\n")
+            process.kill()
+        except Exception as e:
+            print("\n" + "="*80)
+            print(f"❌ Error running sync: {e}")
+            print("="*80 + "\n")
+    
+    thread = threading.Thread(target=run_sync)
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({
+        'status': 'started',
+        'message': 'Airtable sync started! Check the console logs to see progress.'
+    })
 
 @app.route('/rerun', methods=['POST'])
 def rerun_batch():

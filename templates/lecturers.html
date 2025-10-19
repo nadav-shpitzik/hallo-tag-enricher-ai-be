@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>תגיות מוצעות למרצים</title>
+    <title>מערכת הצעות תגיות למרצים</title>
     <style>
         * {
             margin: 0;
@@ -20,7 +20,7 @@
         }
         
         .container {
-            max-width: 1400px;
+            max-width: 1600px;
             margin: 0 auto;
         }
         
@@ -42,18 +42,22 @@
             display: flex;
             gap: 10px;
             margin-top: 20px;
+            flex-wrap: wrap;
         }
         
-        .nav-tabs a {
+        .nav-tabs a, .nav-tabs button {
             padding: 10px 20px;
             background: #f0f0f0;
             color: #333;
             text-decoration: none;
+            border: none;
             border-radius: 8px;
             transition: all 0.3s;
+            cursor: pointer;
+            font-size: 1em;
         }
         
-        .nav-tabs a:hover {
+        .nav-tabs a:hover, .nav-tabs button:hover {
             background: #667eea;
             color: white;
         }
@@ -62,6 +66,64 @@
             background: #667eea;
             color: white;
             font-weight: bold;
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+        
+        .btn-success {
+            background: #27ae60;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #229954;
+        }
+        
+        .btn-warning {
+            background: #f39c12;
+            color: white;
+        }
+        
+        .btn-warning:hover {
+            background: #e67e22;
+        }
+        
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+        
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 0.85em;
         }
         
         .stats {
@@ -101,11 +163,10 @@
             border-radius: 15px;
             padding: 25px;
             box-shadow: 0 5px 20px rgba(0,0,0,0.1);
-            transition: transform 0.3s;
+            transition: all 0.3s;
         }
         
         .lecturer-card:hover {
-            transform: translateY(-5px);
             box-shadow: 0 8px 30px rgba(0,0,0,0.15);
         }
         
@@ -124,11 +185,17 @@
             color: #333;
         }
         
+        .lecturer-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
         .lecturer-meta {
             display: flex;
             gap: 15px;
             color: #666;
             font-size: 0.9em;
+            flex-wrap: wrap;
         }
         
         .meta-badge {
@@ -147,6 +214,17 @@
             padding: 15px;
             border-radius: 10px;
             border-right: 4px solid #667eea;
+            transition: all 0.3s;
+        }
+        
+        .tag-suggestion.approved {
+            border-right-color: #27ae60;
+            background: #e8f8f0;
+        }
+        
+        .tag-suggestion.rejected {
+            border-right-color: #e74c3c;
+            background: #fdecea;
         }
         
         .tag-header {
@@ -154,12 +232,15 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 10px;
+            flex-wrap: wrap;
+            gap: 10px;
         }
         
         .tag-name {
             font-size: 1.1em;
             font-weight: bold;
             color: #333;
+            flex: 1;
         }
         
         .tag-score {
@@ -177,7 +258,7 @@
             border-radius: 15px;
             font-size: 0.85em;
             font-weight: bold;
-            margin-right: 10px;
+            margin-left: 10px;
         }
         
         .status-pending { background: #ffeaa7; color: #d63031; }
@@ -185,13 +266,33 @@
         .status-rejected { background: #fab1a0; color: #d63031; }
         .status-synced { background: #74b9ff; color: #0984e3; }
         
+        .tag-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
         .source-info {
             color: #666;
             font-size: 0.9em;
             margin-top: 8px;
         }
         
-        .source-lectures {
+        details {
+            margin-top: 10px;
+        }
+        
+        summary {
+            cursor: pointer;
+            color: #667eea;
+            font-weight: bold;
+            padding: 5px 0;
+        }
+        
+        summary:hover {
+            color: #5568d3;
+        }
+        
+        .source-lectures, .rationale {
             margin-top: 10px;
             padding: 10px;
             background: white;
@@ -199,19 +300,9 @@
             font-size: 0.85em;
         }
         
-        .source-lecture {
+        .source-lecture, .rationale-item {
             padding: 5px 0;
             color: #555;
-        }
-        
-        .rationale {
-            margin-top: 10px;
-            padding: 10px;
-            background: white;
-            border-radius: 8px;
-            color: #555;
-            font-size: 0.9em;
-            border-right: 2px solid #ddd;
         }
         
         .rationale-item {
@@ -244,17 +335,72 @@
             color: #666;
             font-size: 1.1em;
         }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-weight: bold;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            z-index: 1000;
+            display: none;
+        }
+        
+        .notification.success {
+            background: #27ae60;
+            color: white;
+        }
+        
+        .notification.error {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .notification.info {
+            background: #3498db;
+            color: white;
+        }
+        
+        @media (max-width: 768px) {
+            .lecturer-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+            
+            .tag-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
     </style>
 </head>
 <body>
+    <div id="notification" class="notification"></div>
+    
     <div class="container">
         <header>
-            <h1>🎓 תגיות מוצעות למרצים</h1>
-            <p style="color: #666; margin-top: 10px;">הצגת הצעות תגיות מקובצות לפי מרצה (כל תג מוצע פעם אחת למרצה)</p>
+            <h1>🎓 מערכת הצעות תגיות למרצים</h1>
+            <p style="color: #666; margin-top: 10px;">הצגת הצעות תגיות מקובצות לפי מרצה - כל תג מוצע פעם אחת למרצה</p>
             
             <div class="nav-tabs">
-                <a href="/">צפייה לפי הרצאות</a>
-                <a href="/lecturers" class="active">צפייה לפי מרצים</a>
+                <a href="/" class="active">מרצים</a>
+                <a href="/lectures">הרצאות</a>
+            </div>
+            
+            <div class="action-buttons">
+                <button onclick="syncToAirtable()" class="btn btn-success">
+                    ↻ סנכרן מאושרים ל-Airtable
+                </button>
+                <button onclick="rerunUntagged()" class="btn btn-warning">
+                    🔄 הרץ מחדש להרצאות ללא תגיות
+                </button>
+                <button onclick="rerunAll()" class="btn btn-primary">
+                    🔄 הרץ מחדש לכל ההרצאות
+                </button>
             </div>
             
             <div class="stats">
@@ -276,57 +422,69 @@
         {% if lecturers %}
             <div class="lecturers-grid">
                 {% for lecturer in lecturers %}
-                <div class="lecturer-card">
+                <div class="lecturer-card" id="lecturer-{{ lecturer.lecturer_external_id }}">
                     <div class="lecturer-header">
-                        <div>
+                        <div style="flex: 1;">
                             <div class="lecturer-name">{{ lecturer.lecturer_name }}</div>
                             <div style="color: #999; font-size: 0.85em; margin-top: 5px;">
                                 Airtable ID: {{ lecturer.lecturer_external_id }}
                             </div>
+                            <div class="lecturer-meta" style="margin-top: 10px;">
+                                <div class="meta-badge">
+                                    📚 {{ lecturer.lecture_count }} הרצאות
+                                </div>
+                                <div class="meta-badge">
+                                    🏷️ {{ lecturer.tag_count }} תגיות
+                                </div>
+                            </div>
                         </div>
-                        <div class="lecturer-meta">
-                            <div class="meta-badge">
-                                📚 {{ lecturer.lecture_count }} הרצאות
-                            </div>
-                            <div class="meta-badge">
-                                🏷️ {{ lecturer.tag_count }} תגיות
-                            </div>
+                        <div class="lecturer-actions">
+                            <button onclick="approveAllForLecturer('{{ lecturer.lecturer_external_id }}')" 
+                                    class="btn btn-success btn-sm">
+                                ✓ אשר הכל
+                            </button>
                         </div>
                     </div>
                     
                     <div class="tags-section">
                         {% for tag in lecturer.tags %}
-                        <div class="tag-suggestion">
+                        <div class="tag-suggestion {{ tag.status }}" id="tag-{{ lecturer.lecturer_external_id }}-{{ tag.tag_id }}"
+                             data-suggestion-ids="{{ tag.suggestion_ids|join(',') }}">
                             <div class="tag-header">
-                                <div>
+                                <div style="display: flex; align-items: center; flex: 1; gap: 10px;">
                                     <span class="tag-status status-{{ tag.status }}">{{ tag.status }}</span>
                                     <span class="tag-name">{{ tag.tag_name_he }}</span>
                                 </div>
-                                <span class="tag-score">{{ "%.0f"|format(tag.score * 100) }}%</span>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <span class="tag-score">{{ "%.0f"|format(tag.score * 100) }}%</span>
+                                    <div class="tag-actions">
+                                        {% if tag.status == 'pending' %}
+                                        <button onclick="approveTag(this, {{ tag.suggestion_ids|tojson }})" 
+                                                class="btn btn-success btn-sm">✓</button>
+                                        <button onclick="rejectTag(this, {{ tag.suggestion_ids|tojson }})" 
+                                                class="btn btn-danger btn-sm">✗</button>
+                                        {% endif %}
+                                    </div>
+                                </div>
                             </div>
                             
                             <div class="source-info">
                                 📊 מבוסס על {{ tag.source_count }} הרצאות של המרצה
                             </div>
                             
-                            <details style="margin-top: 10px;">
-                                <summary style="cursor: pointer; color: #667eea; font-weight: bold;">
-                                    הצג הרצאות מקור ({{ tag.source_count }})
-                                </summary>
+                            <details>
+                                <summary>הצג הרצאות מקור ({{ tag.source_count }})</summary>
                                 <div class="source-lectures">
                                     {% for lecture in tag.source_lectures %}
                                     <div class="source-lecture">
                                         • {{ lecture.lecture_title }}
-                                        <span style="color: #999; font-size: 0.9em;">({{ lecture.lecture_external_id }})</span>
                                     </div>
                                     {% endfor %}
                                 </div>
                             </details>
                             
-                            <details style="margin-top: 10px;">
-                                <summary style="cursor: pointer; color: #667eea; font-weight: bold;">
-                                    הצג נימוקים ({{ tag.rationales|length }})
-                                </summary>
+                            <details>
+                                <summary>הצג נימוקים ({{ tag.rationales|length }})</summary>
                                 <div class="rationale">
                                     {% for rationale in tag.rationales %}
                                     <div class="rationale-item">
@@ -351,5 +509,157 @@
             </div>
         {% endif %}
     </div>
+    
+    <script>
+        function showNotification(message, type = 'success') {
+            const notif = document.getElementById('notification');
+            notif.textContent = message;
+            notif.className = `notification ${type}`;
+            notif.style.display = 'block';
+            
+            setTimeout(() => {
+                notif.style.display = 'none';
+            }, 3000);
+        }
+        
+        async function approveTag(button, suggestionIds) {
+            try {
+                const results = await Promise.all(
+                    suggestionIds.map(id => 
+                        fetch(`/api/approve/${id}`, { method: 'POST' })
+                            .then(r => r.json())
+                    )
+                );
+                
+                const success = results.every(r => r.status === 'approved' || r.current_status === 'approved');
+                
+                if (success) {
+                    const tagDiv = button.closest('.tag-suggestion');
+                    tagDiv.classList.remove('pending');
+                    tagDiv.classList.add('approved');
+                    tagDiv.querySelector('.tag-status').textContent = 'approved';
+                    tagDiv.querySelector('.tag-status').className = 'tag-status status-approved';
+                    tagDiv.querySelector('.tag-actions').innerHTML = '';
+                    showNotification('התגית אושרה בהצלחה!');
+                } else {
+                    showNotification('שגיאה באישור התגית', 'error');
+                }
+            } catch (error) {
+                showNotification('שגיאה: ' + error.message, 'error');
+            }
+        }
+        
+        async function rejectTag(button, suggestionIds) {
+            try {
+                const results = await Promise.all(
+                    suggestionIds.map(id => 
+                        fetch(`/api/reject/${id}`, { method: 'POST' })
+                            .then(r => r.json())
+                    )
+                );
+                
+                const success = results.every(r => r.status === 'rejected' || r.current_status === 'rejected');
+                
+                if (success) {
+                    const tagDiv = button.closest('.tag-suggestion');
+                    tagDiv.classList.remove('pending');
+                    tagDiv.classList.add('rejected');
+                    tagDiv.querySelector('.tag-status').textContent = 'rejected';
+                    tagDiv.querySelector('.tag-status').className = 'tag-status status-rejected';
+                    tagDiv.querySelector('.tag-actions').innerHTML = '';
+                    showNotification('התגית נדחתה');
+                } else {
+                    showNotification('שגיאה בדחיית התגית', 'error');
+                }
+            } catch (error) {
+                showNotification('שגיאה: ' + error.message, 'error');
+            }
+        }
+        
+        async function approveAllForLecturer(lecturerId) {
+            const lecturerCard = document.getElementById(`lecturer-${lecturerId}`);
+            const pendingTags = lecturerCard.querySelectorAll('.tag-suggestion.pending');
+            
+            if (pendingTags.length === 0) {
+                showNotification('אין תגיות ממתינות לאישור למרצה זה', 'info');
+                return;
+            }
+            
+            if (!confirm(`לאשר ${pendingTags.length} תגיות למרצה זה?`)) {
+                return;
+            }
+            
+            let approved = 0;
+            for (const tagDiv of pendingTags) {
+                const suggestionIds = tagDiv.dataset.suggestionIds.split(',').map(Number);
+                
+                try {
+                    const results = await Promise.all(
+                        suggestionIds.map(id => 
+                            fetch(`/api/approve/${id}`, { method: 'POST' })
+                                .then(r => r.json())
+                        )
+                    );
+                    
+                    const success = results.every(r => r.status === 'approved' || r.current_status === 'approved');
+                    
+                    if (success) {
+                        tagDiv.classList.remove('pending');
+                        tagDiv.classList.add('approved');
+                        tagDiv.querySelector('.tag-status').textContent = 'approved';
+                        tagDiv.querySelector('.tag-status').className = 'tag-status status-approved';
+                        tagDiv.querySelector('.tag-actions').innerHTML = '';
+                        approved++;
+                    }
+                } catch (error) {
+                    console.error('Error approving tag:', error);
+                }
+            }
+            
+            showNotification(`${approved} תגיות אושרו בהצלחה!`);
+        }
+        
+        async function syncToAirtable() {
+            if (!confirm('לסנכרן את כל התגיות המאושרות ל-Airtable?\n\nוודא שהגדרת את AIRTABLE_API_KEY ו-AIRTABLE_BASE_ID בסודות.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/sync_airtable', { method: 'POST' });
+                const data = await response.json();
+                showNotification(data.message || 'הסנכרון החל! בדוק את הקונסול.', 'info');
+            } catch (error) {
+                showNotification('שגיאה בהתחלת הסנכרון: ' + error.message, 'error');
+            }
+        }
+        
+        async function rerunUntagged() {
+            if (confirm('להריץ את המערכת רק להרצאות ללא תגיות?\n\nזה ישלח בקשות ל-OpenAI API ועלול לעלות כסף.')) {
+                showNotification('מריץ את המערכת עבור הרצאות ללא תגיות...', 'info');
+                
+                try {
+                    const response = await fetch('/rerun', { method: 'POST' });
+                    const data = await response.json();
+                    showNotification(data.message || 'ההרצה החלה! בדוק את הקונסול.', 'info');
+                } catch (error) {
+                    showNotification('שגיאה: ' + error.message, 'error');
+                }
+            }
+        }
+        
+        async function rerunAll() {
+            if (confirm('להריץ את המערכת לכל ההרצאות?\n\nזה ישלח בקשות רבות ל-OpenAI API ועלול לעלות כסף!')) {
+                showNotification('מריץ את המערכת עבור כל ההרצאות...', 'info');
+                
+                try {
+                    const response = await fetch('/rerun', { method: 'POST' });
+                    const data = await response.json();
+                    showNotification(data.message || 'ההרצה החלה! בדוק את הקונסול.', 'info');
+                } catch (error) {
+                    showNotification('שגיאה בהתחלת ההרצה: ' + error.message, 'error');
+                }
+            }
+        }
+    </script>
 </body>
 </html>
