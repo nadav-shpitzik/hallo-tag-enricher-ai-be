@@ -336,6 +336,143 @@ def bulk_approve():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/lecturers')
+def lecturers_view():
+    """Lecturer-centric view: groups suggestions by lecturer."""
+    load_data()
+    
+    if suggestions_df is None or suggestions_df.empty:
+        return render_template('lecturers.html', lecturers=[], stats={})
+    
+    # Join suggestions with lecture data to get lecturer info
+    with DatabaseConnection(os.getenv('DATABASE_URL')) as db:
+        with db.connection.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT 
+                    s.suggestion_id,
+                    s.lecture_id,
+                    s.tag_id,
+                    s.score,
+                    s.rationale,
+                    s.model,
+                    s.status,
+                    l.lecturer_external_id,
+                    l.lecturer_name,
+                    l.lecture_external_id,
+                    l.lecture_title
+                FROM lecture_tag_suggestions s
+                JOIN enriched_lectures l ON s.lecture_id = l.id
+                WHERE l.lecturer_external_id IS NOT NULL
+                ORDER BY l.lecturer_name, s.tag_id
+            """)
+            rows = cur.fetchall()
+    
+    # Group by lecturer
+    from collections import defaultdict
+    lecturer_data = defaultdict(lambda: {
+        'lecturer_external_id': None,
+        'lecturer_name': None,
+        'lecture_count': 0,
+        'lectures': set(),
+        'tags': defaultdict(lambda: {
+            'tag_id': None,
+            'tag_name_he': None,
+            'max_score': 0,
+            'rationales': [],
+            'source_lectures': [],
+            'statuses': set(),
+            'suggestion_ids': []
+        })
+    })
+    
+    for row in rows:
+        lecturer_id = row['lecturer_external_id']
+        tag_id = row['tag_id']
+        
+        # Update lecturer info
+        if lecturer_data[lecturer_id]['lecturer_external_id'] is None:
+            lecturer_data[lecturer_id]['lecturer_external_id'] = lecturer_id
+            lecturer_data[lecturer_id]['lecturer_name'] = row['lecturer_name']
+        
+        # Track unique lectures for this lecturer
+        lecturer_data[lecturer_id]['lectures'].add(row['lecture_id'])
+        
+        # Aggregate tag data
+        tag_info = lecturer_data[lecturer_id]['tags'][tag_id]
+        tag_info['tag_id'] = tag_id
+        tag_info['tag_name_he'] = tags_map.get(tag_id, f"[Missing: {tag_id}]")
+        tag_info['max_score'] = max(tag_info['max_score'], row['score'])
+        tag_info['rationales'].append({
+            'text': row['rationale'],
+            'score': row['score'],
+            'lecture_title': row['lecture_title']
+        })
+        tag_info['source_lectures'].append({
+            'lecture_external_id': row['lecture_external_id'],
+            'lecture_title': row['lecture_title']
+        })
+        tag_info['statuses'].add(row['status'])
+        tag_info['suggestion_ids'].append(row['suggestion_id'])
+    
+    # Convert to list and clean up
+    lecturers_list = []
+    for lecturer_id, lecturer_info in lecturer_data.items():
+        lecturer_info['lecture_count'] = len(lecturer_info['lectures'])
+        
+        # Convert tags dict to list
+        tags_list = []
+        for tag_id, tag_info in lecturer_info['tags'].items():
+            # Deduplicate source lectures
+            unique_lectures = []
+            seen_ids = set()
+            for lec in tag_info['source_lectures']:
+                if lec['lecture_external_id'] not in seen_ids:
+                    unique_lectures.append(lec)
+                    seen_ids.add(lec['lecture_external_id'])
+            
+            # Determine overall status (pending if any pending, approved if all approved, etc.)
+            if 'pending' in tag_info['statuses']:
+                overall_status = 'pending'
+            elif 'approved' in tag_info['statuses']:
+                overall_status = 'approved'
+            elif 'synced' in tag_info['statuses']:
+                overall_status = 'synced'
+            else:
+                overall_status = list(tag_info['statuses'])[0] if tag_info['statuses'] else 'unknown'
+            
+            tags_list.append({
+                'tag_id': tag_info['tag_id'],
+                'tag_name_he': tag_info['tag_name_he'],
+                'score': tag_info['max_score'],
+                'source_count': len(unique_lectures),
+                'source_lectures': unique_lectures,
+                'rationales': tag_info['rationales'],
+                'status': overall_status,
+                'suggestion_ids': tag_info['suggestion_ids']
+            })
+        
+        # Sort tags by score (descending)
+        tags_list.sort(key=lambda x: x['score'], reverse=True)
+        
+        lecturers_list.append({
+            'lecturer_external_id': lecturer_info['lecturer_external_id'],
+            'lecturer_name': lecturer_info['lecturer_name'],
+            'lecture_count': lecturer_info['lecture_count'],
+            'tags': tags_list,
+            'tag_count': len(tags_list)
+        })
+    
+    # Sort by lecturer name
+    lecturers_list.sort(key=lambda x: x['lecturer_name'])
+    
+    stats = {
+        'total_lecturers': len(lecturers_list),
+        'total_tags': sum(len(l['tags']) for l in lecturers_list),
+        'avg_tags_per_lecturer': sum(len(l['tags']) for l in lecturers_list) / len(lecturers_list) if lecturers_list else 0
+    }
+    
+    return render_template('lecturers.html', lecturers=lecturers_list, stats=stats)
+
 @app.route('/rerun', methods=['POST'])
 def rerun_batch():
     """Trigger batch processing in background."""
