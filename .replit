@@ -16,15 +16,15 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Validate Setup"
+args = "Run Batch"
 
 [[workflows.workflow]]
-name = "Validate Setup"
+name = "Run Batch"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python validate_setup.py"
+args = "python src/main.py"
 
 [workflows.workflow.metadata]
 outputType = "console"
