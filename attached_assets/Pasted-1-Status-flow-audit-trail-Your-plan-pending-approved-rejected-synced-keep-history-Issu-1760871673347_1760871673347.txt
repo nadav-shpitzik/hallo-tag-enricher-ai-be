@@ -1,0 +1,181 @@
+1) Status flow & audit trail
+
+Your plan: “pending → approved/rejected → synced; keep history.”
+
+Issue: Not precise enough to prevent ambiguous states and hard-to-debug transitions.
+
+Fix: Use a clear state machine + events table.
+
+Allowed transitions only: pending → approved → synced, pending → rejected, approved → failed (sync) → approved (retry).
+
+Log every transition with actor, action, details.
+
+-- suggestions.status: pending|approved|rejected|synced|failed
+-- events(action): approve|reject|enqueue|sync_ok|sync_fail|retry
+
+2) Idempotency (no duplicate syncs)
+
+Your plan: “Prevent duplicate syncs.”
+
+Issue: No concrete mechanism; race conditions will bite during retries/concurrency.
+
+Fix: Enforce uniqueness and queue semantics.
+
+DB: UNIQUE (lecture_id, tag_id) in lecture_tag_suggestions and in a airtable_sync_items queue table.
+
+Worker: SELECT … FOR UPDATE SKIP LOCKED so two workers can’t grab the same item.
+
+CREATE TABLE airtable_sync_items(
+  lecture_external_id text, tag_id text, status text default 'queued',
+  attempt int default 0, last_error text,
+  UNIQUE(lecture_external_id, tag_id)
+);
+
+3) Airtable mapping keys (must decide)
+
+Your plan: “Batch upsert to Airtable.”
+
+Issue: Missing mapping strategy guarantees 422s or silent mismatches.
+
+Fix: Define mappings now and cache them.
+
+Lectures: lecture_external_id → Lectures.recordId (via a dedicated external_id field in Airtable).
+
+Tags: tag_id → Tags.recordId (Linked Record) or option name (Multi-select).
+
+Build lectures_map and tags_map at job start; if a mapping is missing: mark item failed with reason (lecture_missing/tag_missing) and show in UI.
+
+4) Field type ambiguity (Linked Record vs Multi-select)
+
+Your plan: “Airtable REST API, batch upsert.”
+
+Issue: Payload differs by field type; without a decision you’ll ship broken bodies.
+
+Fix: Add a config flag and implement both payloads.
+
+AIRTABLE_FIELD_TAGS_TYPE=linked|multiselect
+
+// linked
+{ "fields": { "Tags": [ {"id":"recTag1"}, {"id":"recTag2"} ] } }
+// multi-select
+{ "fields": { "Tags": ["חדשנות","שיווק"] } }
+
+5) Set-based update (don’t clobber existing Airtable tags)
+
+Your plan: “Push to Airtable.”
+
+Issue: If you PATCH with only new tags, you might replace existing ones.
+
+Fix: Read-modify-write:
+
+GET current lecture record (Tags).
+
+UNION with approved tag targets.
+
+PATCH the combined set.
+This makes the sync idempotent and non-destructive.
+
+6) Rate limits & retries (too vague)
+
+Your plan: “Error handling + retry logic.”
+
+Issue: Without specific backoff you’ll flap under 429/5xx.
+
+Fix: Concrete policy:
+
+Batch size = 10 records; backoff 1s → 2s → 4s → 8s → 16s (jitter), max 5 tries.
+
+Classify errors: transient (429/5xx → retry) vs permanent (4xx schema/mapping → mark failed with last_error).
+
+Persist attempt and last_error in airtable_sync_items.
+
+7) Dry-run semantics
+
+Your plan: “Dry-run mode for testing.”
+
+Issue: If dry-run skips all DB writes, reviewers can’t validate flows.
+
+Fix: In dry-run:
+
+Still allow approve/reject (update statuses + events).
+
+Do not enqueue sync items or call Airtable; instead log the payload that would be sent.
+
+8) Bulk approval scope
+
+Your plan: “Bulk approval for all suggestions in a lecture.”
+
+Issue: Missing per-suggestion vs per-lecture nuance can approve weak tags.
+
+Fix: Offer both:
+
+“Approve selected suggestions”
+
+“Approve top-K by score for this lecture” (e.g., all ≥0.88).
+Always write one event per suggestion (so audit is granular).
+
+9) Views/indexes for fast UI
+
+Your plan: “Filter by approval status; show sync status.”
+
+Issue: Without proper indexes/views UI will lag on larger sets.
+
+Fix: Add:
+
+Indexes: idx_sugg_status, idx_sugg_lecture.
+
+A v_pending_lectures view aggregating suggestions per lecture (fewer roundtrips; simpler JSON to render).
+
+10) Worker concurrency & safety
+
+Your plan: “Sync approved → mark synced.”
+
+Issue: Under concurrency you can double-send or reorder states.
+
+Fix: Worker loop:
+
+-- dequeue N
+SELECT * FROM airtable_sync_items
+WHERE status='queued'
+ORDER BY created_at
+FOR UPDATE SKIP LOCKED
+LIMIT :N;
+
+
+Group by lecture_external_id to send one PATCH per lecture.
+
+On success: set suggestions synced, queue items done, event sync_ok.
+
+On transient failure: attempt++, keep queued, event sync_fail.
+
+On permanent failure: set item failed, suggestions remain approved (user can retry after fixing mapping).
+
+11) Security scope
+
+Your plan: “Store both suggestions + sync history.”
+
+Issue: Risk of writes to source tables.
+
+Fix: DB role permissions: read enriched_lectures; write only lecture_tag_suggestions, events, sync_items. Validate at connection time.
+
+12) UX clarity (small but important)
+
+Your plan: “Show approve/reject; show sync status.”
+
+Issue: Reviewers need fast context to trust decisions.
+
+Fix: In the detail panel, show: tag name (Hebrew), score, rationale, suggested by (model), created_at. Add status badges (pending/approved/rejected/synced/failed) and a Retry failed button per lecture.
+
+13) Post-run accountability
+
+Your plan: “Audit trail (who approved, when synced).”
+
+Issue: Not actionable without a summary.
+
+Fix: End-of-run report:
+
+counts: approved/rejected/synced/failed
+
+top failure reasons (mapping/rate-limit/validation)
+
+list of lectures with remaining approved but not synced.
