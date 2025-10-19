@@ -37,6 +37,8 @@ def main():
         logger.info("Please set required environment variables (see .env.example)")
         return 1
     
+    logger.info(f"Configuration: scoring_mode={config.scoring_mode}, only_untagged={config.only_untagged}")
+    
     logger.info("Step 1: Loading tags from CSV")
     tags_loader = TagsLoader(config.tags_csv_path)
     tags_data = tags_loader.load()
@@ -44,7 +46,7 @@ def main():
     
     logger.info("Step 2: Fetching lectures from database")
     with DatabaseConnection(config.database_url) as db:
-        lectures = db.fetch_lectures()
+        lectures = db.fetch_lectures(only_untagged=config.only_untagged)
     
     if not lectures:
         logger.error("No lectures found in database")

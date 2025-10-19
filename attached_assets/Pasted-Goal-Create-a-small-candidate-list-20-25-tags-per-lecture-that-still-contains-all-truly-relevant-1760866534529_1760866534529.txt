@@ -1,0 +1,128 @@
+Goal
+
+Create a small candidate list (~20–25 tags) per lecture that still contains all truly relevant tags with very high probability.
+
+The shortlist algorithm (union of multiple “recall-first” signals)
+
+Signals we’ll use (compute all, then take a capped union):
+
+Keyword hits (Hebrew-normalized) — any tag whose name_he or synonyms_he appears in title/description.
+Why: near-zero false negatives; we must include all hits.
+
+Prototype similarity — cosine(v_lecture, centroid(tag)) from your prototype-kNN.
+Why: best “looks like our past” signal.
+
+Label similarity — cosine(v_lecture, emb(“תגית: {שם} | נרדפות: …”)).
+Why: rescues low-data tags.
+
+Lecturer-profile prior (optional) — tags frequently co-occurring with this lecturer historically (or from the new profiles if you extract topics).
+Why: cheap boost for likely tags.
+
+Config (good starting values):
+
+Kw = ALL keyword hits (no cap)
+
+Kp = 12 top by prototype score
+
+Kl = 10 top by label similarity
+
+Kprof = 5 top by lecturer prior
+
+MaxCandidates = 25 (hard cap)
+
+τ_low_proto = 0.42, τ_low_label = 0.46 (include any tag above these even if outside top-K)
+
+Backstop expansion: if after union we have < 12 candidates, expand Kp and Kl to 20 each (still cap at MaxCandidates)
+
+These are conservative and recall-biased. They’ll keep tokens down but strongly prefer not missing a relevant tag.
+
+Recall safety nets (so we don’t miss relevant tags)
+
+Must-include set:
+
+Always include all keyword hits (no score threshold).
+
+Always include any tag with prototype_score ≥ τ_low_proto OR label_score ≥ τ_low_label.
+
+Dynamic expansion for “hard” lectures:
+
+If both top prototype and label scores < 0.55 and Kw is empty → increase MaxCandidates to 40 for this lecture.
+
+LLM fallback if empty/too few selected:
+
+If ReasoningScorer returns zero tags at ≥0.85 confidence, auto-retry once with full 85-tag list (or with MaxCandidates=40) for that lecture only.
+
+Cold-tag bias correction:
+
+For tags with <5 examples, boost rank by +0.03 on the label-similarity list; helps them enter the shortlist.
+
+Lecturer prior smoothing:
+
+If a lecturer has no history, do not penalize; simply skip that signal.
+
+Pseudocode (drop in before calling ReasoningScorer)
+def shortlist_candidates(lecture, tags, scores_proto, scores_label, lecturer_prior):
+    # scores_*: dict[tag_id] -> float in [0,1]
+    # lecturer_prior: dict[tag_id] -> float (0..1) or empty if unknown
+
+    kw_hits = set(find_keyword_hits(lecture, tags))  # ALL hits, no cap
+
+    # top-K by each signal
+    top_proto = {tid for tid, s in sorted(scores_proto.items(), key=lambda x: x[1], reverse=True)[:12]}
+    top_label = {tid for tid, s in sorted(scores_label.items(), key=lambda x: x[1], reverse=True)[:10]}
+    top_prior = {tid for tid, p in sorted(lecturer_prior.items(), key=lambda x: x[1], reverse=True)[:5]}
+
+    # must-include thresholds
+    must_proto = {tid for tid, s in scores_proto.items() if s >= 0.42}
+    must_label = {tid for tid, s in scores_label.items() if s >= 0.46}
+
+    # union (recall-first)
+    U = kw_hits | top_proto | top_label | top_prior | must_proto | must_label
+
+    # Hard-lecture expansion
+    if not kw_hits and max(scores_proto.values() or [0]) < 0.55 and max(scores_label.values() or [0]) < 0.55:
+        top_proto_exp = {tid for tid, s in sorted(scores_proto.items(), key=lambda x: x[1], reverse=True)[:20]}
+        top_label_exp = {tid for tid, s in sorted(scores_label.items(), key=lambda x: x[1], reverse=True)[:20]}
+        U |= top_proto_exp | top_label_exp
+
+    # If still tiny, expand cap
+    MaxCandidates = 25 if len(U) >= 12 else 40
+
+    # Final trim: sort by blended score to keep best
+    def blended(tid):
+        return 0.8 * scores_proto.get(tid, 0) + 0.2 * scores_label.get(tid, 0) + 0.03 * lecturer_prior.get(tid, 0)
+    ranked = sorted(list(U), key=lambda tid: blended(tid), reverse=True)
+
+    return ranked[:MaxCandidates]
+
+
+Then call:
+
+candidates = shortlist_candidates(...)
+reasoning.select_tags(lecture, candidate_tags=candidates)
+
+How we prove we didn’t hurt recall (quick offline check)
+
+Holdout set with ground truth tags (from your already-tagged lectures).
+
+For each lecture in holdout:
+
+Build the shortlist using the recipe above.
+
+Compute Recall@shortlist = % of gold tags contained in the shortlist.
+
+Target: ≥ 98% Recall@shortlist (almost all gold tags present).
+
+If below, raise Kp/Kl, lower τ_low_*, or increase MaxCandidates to 30 temporarily.
+
+Optional runtime guard:
+
+If LLM returns empty, log and retry with full tag set for that lecture (ensures no catastrophic misses).
+
+Small tweaks you can tune safely
+
+If your tags grow beyond 85, set MaxCandidates ≈ min(25, ceil(0.3 * sqrt(#tags)) + 15).
+
+If lectures are very short, weight label similarity a bit more (e.g., blend 0.7/0.3).
+
+Bottom line: this shortlist is recall-first (union of several generous signals + safety nets) and typically shrinks each LLM call to ~15–25 tags. If anything slips through, the auto-retry with full list guarantees coverage for those rare cases.

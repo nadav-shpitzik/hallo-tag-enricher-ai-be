@@ -19,7 +19,7 @@ class DatabaseConnection:
         if self.connection:
             self.connection.close()
     
-    def fetch_lectures(self) -> List[Dict[str, Any]]:
+    def fetch_lectures(self, only_untagged: bool = False) -> List[Dict[str, Any]]:
         if not self.connection:
             raise RuntimeError("Database connection not established")
         with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
@@ -35,11 +35,17 @@ class DatabaseConnection:
                 FROM enriched_lectures
                 WHERE is_active = true 
                   AND soft_deleted = false
-                ORDER BY id
             """
+            if only_untagged:
+                query += """
+                  AND (lecture_tag_ids IS NULL OR lecture_tag_ids = '[]'::jsonb OR jsonb_array_length(lecture_tag_ids) = 0)
+                """
+            query += "\nORDER BY id"
+            
             cursor.execute(query)
             results = cursor.fetchall()
-            logger.info(f"Fetched {len(results)} active lectures from database")
+            tag_filter = "untagged" if only_untagged else "all active"
+            logger.info(f"Fetched {len(results)} {tag_filter} lectures from database")
             return [dict(row) for row in results]
     
     def create_suggestions_table(self) -> None:
