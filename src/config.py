@@ -19,6 +19,8 @@ class Config:
     only_untagged: bool = True
     use_shortlist: bool = True
     shortlist_fallback: bool = True
+    test_mode: bool = False
+    test_mode_limit: int = 30
     
     embedding_model: str = "text-embedding-3-large"
     embedding_dimensions: int = 3072
@@ -60,6 +62,8 @@ class Config:
             only_untagged=os.getenv("ONLY_UNTAGGED", "true").lower() == "true",
             use_shortlist=os.getenv("USE_SHORTLIST", "true").lower() == "true",
             shortlist_fallback=os.getenv("SHORTLIST_FALLBACK", "true").lower() == "true",
+            test_mode=os.getenv("TEST_MODE", "false").lower() == "true",
+            test_mode_limit=int(os.getenv("TEST_MODE_LIMIT", "30")),
             embedding_model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-large"),
             llm_model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
         )
