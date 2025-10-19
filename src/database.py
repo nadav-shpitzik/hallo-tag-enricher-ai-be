@@ -49,27 +49,10 @@ class DatabaseConnection:
             return [dict(row) for row in results]
     
     def create_suggestions_table(self) -> None:
+        """Create suggestions table - now handled by migrations, kept for backwards compatibility."""
         if not self.connection:
             raise RuntimeError("Database connection not established")
-        with self.connection.cursor() as cursor:
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS lecture_tag_suggestions (
-                    suggestion_id       BIGSERIAL PRIMARY KEY,
-                    lecture_id          BIGINT NOT NULL REFERENCES enriched_lectures(id) ON DELETE CASCADE,
-                    lecture_external_id VARCHAR NOT NULL,
-                    tag_id              VARCHAR NOT NULL,
-                    tag_name_he         VARCHAR NOT NULL,
-                    score               NUMERIC(5,4) NOT NULL,
-                    rationale           TEXT,
-                    sources             JSONB DEFAULT '["title","description"]',
-                    model               TEXT NOT NULL,
-                    status              VARCHAR NOT NULL DEFAULT 'pending',
-                    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE (lecture_id, tag_id)
-                )
-            """)
-            self.connection.commit()
-            logger.info("Created/verified lecture_tag_suggestions table")
+        logger.info("Suggestions table should exist from migration, skipping creation")
     
     def upsert_suggestions(self, suggestions: List[Dict[str, Any]]) -> None:
         if not self.connection:
@@ -92,3 +75,115 @@ class DatabaseConnection:
             cursor.executemany(query, suggestions)
             self.connection.commit()
             logger.info(f"Upserted {len(suggestions)} tag suggestions to database")
+    
+    def create_event(self, suggestion_id: int, action: str, actor: Optional[str] = None, 
+                     previous_status: Optional[str] = None, new_status: Optional[str] = None,
+                     details: Optional[Dict[str, Any]] = None) -> None:
+        """Create an audit event for a suggestion."""
+        if not self.connection:
+            raise RuntimeError("Database connection not established")
+        
+        import json
+        with self.connection.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO suggestion_events 
+                    (suggestion_id, action, actor, previous_status, new_status, details)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (suggestion_id, action, actor, previous_status, new_status, 
+                  json.dumps(details) if details else None))
+            self.connection.commit()
+    
+    def get_suggestions_by_status(self, status: str) -> List[Dict[str, Any]]:
+        """Get all suggestions with a specific status."""
+        if not self.connection:
+            raise RuntimeError("Database connection not established")
+        
+        with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                SELECT * FROM lecture_tag_suggestions
+                WHERE status = %s
+                ORDER BY created_at DESC
+            """, (status,))
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def update_suggestion_status(self, suggestion_id: int, new_status: str, 
+                                 actor: Optional[str] = None) -> bool:
+        """Update suggestion status and create audit event."""
+        if not self.connection:
+            raise RuntimeError("Database connection not established")
+        
+        with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            # Get current status
+            cursor.execute("""
+                SELECT status FROM lecture_tag_suggestions
+                WHERE suggestion_id = %s
+            """, (suggestion_id,))
+            row = cursor.fetchone()
+            if not row:
+                return False
+            
+            previous_status = row['status']
+            
+            # Update status with approval metadata
+            if new_status == 'approved':
+                cursor.execute("""
+                    UPDATE lecture_tag_suggestions
+                    SET status = %s, approved_by = %s, approved_at = CURRENT_TIMESTAMP
+                    WHERE suggestion_id = %s
+                """, (new_status, actor, suggestion_id))
+            elif new_status == 'synced':
+                cursor.execute("""
+                    UPDATE lecture_tag_suggestions
+                    SET status = %s, synced_at = CURRENT_TIMESTAMP
+                    WHERE suggestion_id = %s
+                """, (new_status, suggestion_id))
+            else:
+                cursor.execute("""
+                    UPDATE lecture_tag_suggestions
+                    SET status = %s
+                    WHERE suggestion_id = %s
+                """, (new_status, suggestion_id))
+            
+            # Create audit event - map status to allowed actions
+            action_map = {
+                'approved': 'approve',
+                'rejected': 'reject',
+                'synced': 'sync_ok',
+                'failed': 'sync_fail'
+            }
+            action = action_map.get(new_status, new_status)
+            self.create_event(suggestion_id, action, actor, previous_status, new_status)
+            
+            self.connection.commit()
+            logger.info(f"Updated suggestion {suggestion_id}: {previous_status} -> {new_status}")
+            return True
+    
+    def enqueue_for_sync(self, suggestion_id: int) -> None:
+        """Add a suggestion to the Airtable sync queue."""
+        if not self.connection:
+            raise RuntimeError("Database connection not established")
+        
+        with self.connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            # Get suggestion details
+            cursor.execute("""
+                SELECT lecture_external_id, tag_id 
+                FROM lecture_tag_suggestions
+                WHERE suggestion_id = %s
+            """, (suggestion_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise ValueError(f"Suggestion {suggestion_id} not found")
+            
+            # Insert into sync queue (ON CONFLICT DO NOTHING for idempotency)
+            cursor.execute("""
+                INSERT INTO airtable_sync_items 
+                    (lecture_external_id, tag_id, suggestion_id, status)
+                VALUES (%s, %s, %s, 'queued')
+                ON CONFLICT (lecture_external_id, tag_id) DO NOTHING
+            """, (row['lecture_external_id'], row['tag_id'], suggestion_id))
+            
+            # Create enqueue event
+            self.create_event(suggestion_id, 'enqueue', None, None, None)
+            
+            self.connection.commit()
+            logger.info(f"Enqueued suggestion {suggestion_id} for Airtable sync")
