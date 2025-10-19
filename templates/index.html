@@ -574,6 +574,9 @@
             <div class="lecture-card">
                 <div class="lecture-header">
                     <span class="lecture-id">ID: {{ lecture.lecture_id }}</span>
+                    {% if lecture.external_id %}
+                    <span class="lecture-id"> • External ID: {{ lecture.external_id }}</span>
+                    {% endif %}
                     <div class="lecture-title">{{ lecture.title or '—' }}</div>
                     <div class="lecturer-info">
                         <span class="name">👨‍🏫 {{ lecture.lecturer_name or '—' }}</span>
@@ -581,9 +584,6 @@
                         <span> • {{ lecture.lecturer_role }}</span>
                         {% endif %}
                     </div>
-                    {% if lecture.price %}
-                    <div class="price">💰 ₪{{ "{:,}".format(lecture.price) }}</div>
-                    {% endif %}
                 </div>
                 
                 <div class="lecture-body">
@@ -610,9 +610,6 @@
                         <div class="section-title">
                             <span>✨ הצעות חדשות ({{ lecture.suggestion_count }})</span>
                             <div class="bulk-actions">
-                                <button onclick="bulkApprove({{ lecture.lecture_id }}, 0.88)" class="btn btn-sm btn-success">
-                                    ✓ אשר כל מעל 88%
-                                </button>
                                 <button onclick="bulkApprove({{ lecture.lecture_id }}, 0.0)" class="btn btn-sm btn-success">
                                     ✓ אשר הכל
                                 </button>

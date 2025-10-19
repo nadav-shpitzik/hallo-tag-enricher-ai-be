@@ -68,7 +68,10 @@ def load_data():
             
             # Convert to DataFrame
             suggestions_df = pd.DataFrame([dict(s) for s in suggestions])
-            suggestions_df['tag_name_he'] = suggestions_df['tag_id'].map(tags_map)
+            # Map tag_id to tag_name_he, use tag_id itself if not found in CSV
+            suggestions_df['tag_name_he'] = suggestions_df['tag_id'].apply(
+                lambda x: tags_map.get(x, f"[Missing: {x}]")
+            )
             
             # Get unique lecture IDs
             lecture_ids = suggestions_df['lecture_id'].unique().tolist()
