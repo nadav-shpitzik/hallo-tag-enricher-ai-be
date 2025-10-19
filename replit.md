@@ -38,6 +38,13 @@ This project implements a one-off batch system for enriching Hebrew lectures wit
 - Created CSV and database output generators
 - Added QA reporting (coverage, distribution, score stats)
 
+### Web Viewer Added
+- Built Flask-based web viewer for browsing results interactively
+- Features: filterable by score, tag name, model type, previous tags status
+- Hebrew RTL support with responsive design
+- Shows lecture details, previous tags, and new suggestions per lecture
+- Live statistics dashboard (193 lectures, 295 suggestions, 74.1% avg score)
+
 ### Files Structure
 ```
 src/
@@ -52,11 +59,16 @@ src/
   └── main.py            # Orchestration and execution
 
 data/
-  └── tags_example.csv   # Example tags format
+  └── tags.csv           # Tags with Hebrew names and synonyms
 
 output/                  # Generated suggestions (gitignored)
+  ├── tag_suggestions.csv      # Main output (295 suggestions)
+  └── suggestions_report.txt   # Text report for review
 
-validate_setup.py        # Setup validation helper
+web_viewer.py            # Flask web viewer for browsing results
+view_results.py          # CLI script for text-based viewing
+templates/
+  └── index.html         # Web viewer HTML template
 ```
 
 ## User Preferences
@@ -89,6 +101,23 @@ This will:
 - Save results to CSV (and optionally database)
 - Generate QA report
 
+### Viewing Results
+
+**Web Viewer (Interactive):**
+- Run the "Web Viewer" workflow from Replit UI
+- Browse suggestions with filters (score, tags, model type)
+- Hebrew-friendly interface with per-lecture details
+
+**CLI Viewer:**
+```bash
+python view_results.py
+```
+Generates text report with all lecture details and suggestions
+
+**Direct CSV:**
+- `output/tag_suggestions.csv` - Machine-readable results
+- `output/suggestions_report.txt` - Human-readable text report
+
 ### Configuration Options
 - `USE_LLM=true|false` - Enable/disable LLM arbiter (default: true)
 - `WRITE_TO_DB=true|false` - Write to database table (default: false)
@@ -112,6 +141,7 @@ This will:
 - numpy (vector operations)
 - scikit-learn (similarity computations)
 - python-dotenv (environment config)
+- flask (web viewer)
 
 ## Security Notes
 - Uses read-only database user (recommended)
