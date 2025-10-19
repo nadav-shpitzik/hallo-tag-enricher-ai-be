@@ -17,6 +17,8 @@ class Config:
     write_to_db: bool = False
     scoring_mode: str = "reasoning"
     only_untagged: bool = True
+    use_shortlist: bool = True
+    shortlist_fallback: bool = True
     
     embedding_model: str = "text-embedding-3-large"
     embedding_dimensions: int = 3072
@@ -56,6 +58,8 @@ class Config:
             write_to_db=os.getenv("WRITE_TO_DB", "false").lower() == "true",
             scoring_mode=os.getenv("SCORING_MODE", "reasoning"),
             only_untagged=os.getenv("ONLY_UNTAGGED", "true").lower() == "true",
+            use_shortlist=os.getenv("USE_SHORTLIST", "true").lower() == "true",
+            shortlist_fallback=os.getenv("SHORTLIST_FALLBACK", "true").lower() == "true",
             embedding_model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-large"),
             llm_model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
         )

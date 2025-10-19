@@ -58,14 +58,103 @@ def main():
         lecturer_names = [lec.get('lecturer_name') for lec in lectures if lec.get('lecturer_name')]
         lecturer_profiles = lecturer_service.get_bulk_profiles(lecturer_names)
         
+        # Generate embeddings for shortlist (if enabled)
+        tags_list = list(tags_data.values())
+        
+        if config.use_shortlist:
+            logger.info("Step 3b: Generating embeddings for shortlist")
+            from shortlist import ShortlistGenerator
+            
+            shortlist_gen = ShortlistGenerator()
+            embeddings_gen = EmbeddingsGenerator(config.openai_api_key, config.embedding_model)
+            
+            # Generate lecture embeddings
+            lecture_texts = [
+                f"כותרת: {lec.get('lecture_title', '')} תיאור: {lec.get('lecture_description', '')}"
+                for lec in lectures
+            ]
+            lecture_embeddings = embeddings_gen.generate_batch(
+                lecture_texts, 
+                batch_size=config.batch_size_embeddings
+            )
+            
+            # Generate tag label embeddings
+            tag_label_texts_list = list(tag_label_texts.values())
+            tag_ids_list = list(tag_label_texts.keys())
+            tag_embeddings = embeddings_gen.generate_batch(
+                tag_label_texts_list,
+                batch_size=config.batch_size_embeddings
+            )
+            tag_embeddings_dict = {
+                tag_id: tag_embeddings[i] 
+                for i, tag_id in enumerate(tag_ids_list)
+                if i < len(tag_embeddings)
+            }
+            
+            # Build lecturer tag history
+            all_lectures = []
+            with DatabaseConnection(config.database_url) as db:
+                all_lectures = db.fetch_lectures(only_untagged=False)
+            lecturer_history = shortlist_gen.build_lecturer_tag_history(all_lectures)
+            
+            logger.info(f"Generated embeddings for {len(lecture_embeddings)} lectures and {len(tag_embeddings_dict)} tags")
+        
         logger.info("Step 4: Scoring with reasoning model")
         reasoning_scorer = ReasoningScorer(config.llm_model)
-        tags_list = list(tags_data.values())
-        suggestions_dict = reasoning_scorer.score_batch(
-            lectures,
-            tags_list,
-            lecturer_profiles
-        )
+        
+        if config.use_shortlist:
+            # Score with shortlists
+            suggestions_dict = {}
+            total_tokens_saved = 0
+            
+            for i, lecture in enumerate(lectures):
+                # Generate shortlist for this lecture
+                lecture_embedding = lecture_embeddings[i] if i < len(lecture_embeddings) else None
+                candidate_tags, debug_info = shortlist_gen.generate_shortlist(
+                    lecture,
+                    tags_list,
+                    lecture_embedding=lecture_embedding,
+                    tag_embeddings=tag_embeddings_dict,
+                    prototype_embeddings=None,  # Could add if we have prototypes
+                    lecturer_tag_history=lecturer_history
+                )
+                
+                # Log shortlist stats periodically
+                if i % 10 == 0:
+                    logger.info(f"Lecture {i+1}/{len(lectures)}: shortlist has {len(candidate_tags)}/{len(tags_list)} tags")
+                    tokens_saved = (len(tags_list) - len(candidate_tags)) * 100  # Rough estimate
+                    total_tokens_saved += tokens_saved
+                
+                # Score with shortlist
+                lecturer_profile = lecturer_profiles.get(lecture.get('lecturer_name'))
+                suggestions = reasoning_scorer.score_lecture(
+                    lecture, 
+                    candidate_tags,  # Pass shortlist instead of all tags
+                    lecturer_profile
+                )
+                
+                if suggestions:
+                    suggestions_dict[lecture['id']] = suggestions
+                    
+                # Fallback: if no tags selected, retry with full list
+                if not suggestions and config.shortlist_fallback:
+                    logger.info(f"No tags found for lecture {lecture['id']}, retrying with full tag list")
+                    suggestions = reasoning_scorer.score_lecture(
+                        lecture,
+                        tags_list,  # Full list
+                        lecturer_profile
+                    )
+                    if suggestions:
+                        suggestions_dict[lecture['id']] = suggestions
+            
+            logger.info(f"Estimated tokens saved with shortlist: ~{total_tokens_saved:,}")
+        else:
+            # Original: score with all tags
+            suggestions_dict = reasoning_scorer.score_batch(
+                lectures,
+                tags_list,
+                lecturer_profiles
+            )
         
         suggestions = {}
         for lecture in lectures:
