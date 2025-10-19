@@ -25,7 +25,7 @@ def load_data():
     """Load suggestions, lectures, and tags on startup."""
     global suggestions_df, lectures_cache, tags_map
     
-    csv_path = 'output/tag_suggestions.csv'
+    csv_path = os.getenv('OUTPUT_CSV_PATH', 'output/tag_suggestions.csv')
     if not os.path.exists(csv_path):
         print(f"Error: No suggestions file found at {csv_path}")
         return False
