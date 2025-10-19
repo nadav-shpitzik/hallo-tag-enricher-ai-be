@@ -27,8 +27,9 @@ class DatabaseConnection:
                 SELECT 
                     id,
                     lecture_external_id,
-                    lecture_title,
-                    lecture_description,
+                    lecture_title AS name,
+                    lecture_description AS description,
+                    lecturer_name,
                     lecture_tags,
                     lecture_tag_ids
                 FROM enriched_lectures

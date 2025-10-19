@@ -15,6 +15,7 @@ class Config:
     
     use_llm: bool = True
     write_to_db: bool = False
+    scoring_mode: str = "reasoning"
     
     embedding_model: str = "text-embedding-3-large"
     embedding_dimensions: int = 3072
@@ -52,6 +53,7 @@ class Config:
             output_csv_path=os.getenv("OUTPUT_CSV_PATH", "output/tag_suggestions.csv"),
             use_llm=os.getenv("USE_LLM", "true").lower() == "true",
             write_to_db=os.getenv("WRITE_TO_DB", "false").lower() == "true",
+            scoring_mode=os.getenv("SCORING_MODE", "reasoning"),
             embedding_model=os.getenv("EMBEDDING_MODEL", "text-embedding-3-large"),
             llm_model=os.getenv("LLM_MODEL", "gpt-4o-mini"),
         )
