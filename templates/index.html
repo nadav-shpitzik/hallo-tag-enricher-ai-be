@@ -355,8 +355,15 @@
 <body>
     <div class="header">
         <div class="container">
-            <h1>🏷️ מערכת הצעות תגיות AI</h1>
-            <p class="subtitle">מערכת אוטומטית להצעת תגיות להרצאות בעברית</p>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h1>🏷️ מערכת הצעות תגיות AI</h1>
+                    <p class="subtitle">מערכת אוטומטית להצעת תגיות להרצאות בעברית</p>
+                </div>
+                <button onclick="rerunBatch()" class="btn btn-primary" style="height: fit-content;">
+                    🔄 הרץ מחדש
+                </button>
+            </div>
         </div>
     </div>
     
@@ -501,5 +508,39 @@
             </div>
         {% endif %}
     </div>
+    
+    <script>
+        function rerunBatch() {
+            if (!confirm('האם אתה בטוח שברצונך להריץ מחדש את תהליך יצירת ההצעות?\nזה ייקח כמה דקות.')) {
+                return;
+            }
+            
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = '⏳ מריץ...';
+            
+            fetch('/rerun', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message);
+                btn.textContent = '✓ התחיל';
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.textContent = '🔄 הרץ מחדש';
+                }, 3000);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('שגיאה בהרצת התהליך');
+                btn.disabled = false;
+                btn.textContent = '🔄 הרץ מחדש';
+            });
+        }
+    </script>
 </body>
 </html>

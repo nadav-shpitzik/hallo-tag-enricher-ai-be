@@ -7,7 +7,9 @@ import json
 import pandas as pd
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, redirect, url_for
+import subprocess
+import threading
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -153,6 +155,34 @@ def get_lecture(lecture_id):
     return jsonify({
         'lecture': lecture,
         'suggestions': suggestions.to_dict('records')
+    })
+
+@app.route('/rerun', methods=['POST'])
+def rerun_batch():
+    """Trigger batch processing in background."""
+    def run_batch():
+        try:
+            result = subprocess.run(
+                ['python', 'src/main.py'],
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+            print(f"Batch completed with exit code: {result.returncode}")
+            if result.returncode == 0:
+                load_data()
+        except subprocess.TimeoutExpired:
+            print("Batch processing timed out after 5 minutes")
+        except Exception as e:
+            print(f"Error running batch: {e}")
+    
+    thread = threading.Thread(target=run_batch)
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({
+        'status': 'started',
+        'message': 'Batch processing started in background. Refresh the page in a few minutes to see new results.'
     })
 
 if __name__ == '__main__':
