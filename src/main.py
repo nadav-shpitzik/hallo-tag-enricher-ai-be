@@ -1,5 +1,6 @@
 import logging
 import sys
+import os
 from config import Config
 from database import DatabaseConnection
 from tags_loader import TagsLoader
@@ -48,6 +49,12 @@ def main():
     with DatabaseConnection(config.database_url) as db:
         lectures = db.fetch_lectures(only_untagged=config.only_untagged)
     
+    # Test limit for quick testing
+    test_limit = int(os.getenv('TEST_LIMIT', '0'))
+    if test_limit > 0:
+        lectures = lectures[:test_limit]
+        logger.info(f"Limited to {test_limit} lectures for testing")
+    
     if not lectures:
         logger.error("No lectures found in database")
         return 1
@@ -73,18 +80,12 @@ def main():
                 f"כותרת: {lec.get('lecture_title', '')} תיאור: {lec.get('lecture_description', '')}"
                 for lec in lectures
             ]
-            lecture_embeddings = embeddings_gen.generate_batch(
-                lecture_texts, 
-                batch_size=config.batch_size_embeddings
-            )
+            lecture_embeddings = embeddings_gen.generate_embeddings(lecture_texts, desc="lectures")
             
             # Generate tag label embeddings
             tag_label_texts_list = list(tag_label_texts.values())
             tag_ids_list = list(tag_label_texts.keys())
-            tag_embeddings = embeddings_gen.generate_batch(
-                tag_label_texts_list,
-                batch_size=config.batch_size_embeddings
-            )
+            tag_embeddings = embeddings_gen.generate_embeddings(tag_label_texts_list, desc="tag labels")
             tag_embeddings_dict = {
                 tag_id: tag_embeddings[i] 
                 for i, tag_id in enumerate(tag_ids_list)

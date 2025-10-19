@@ -160,6 +160,7 @@ class ShortlistGenerator:
         # 2. Prototype similarities (if available)
         top_proto = set()
         must_proto = set()
+        proto_scores = {}
         if lecture_embedding is not None and prototype_embeddings:
             proto_scores = self.compute_prototype_similarities(
                 lecture_embedding, prototype_embeddings
@@ -177,6 +178,7 @@ class ShortlistGenerator:
         # 3. Label similarities  
         top_label = set()
         must_label = set()
+        label_scores = {}
         if lecture_embedding is not None and tag_embeddings:
             label_scores = self.compute_label_similarities(
                 lecture_embedding, tag_embeddings
@@ -193,6 +195,7 @@ class ShortlistGenerator:
         
         # 4. Lecturer priors
         top_prior = set()
+        priors = {}
         if lecturer_tag_history:
             lecturer_name = lecture.get('lecturer_name')
             priors = self.get_lecturer_priors(lecturer_name, lecturer_tag_history)
