@@ -38,7 +38,7 @@ def main():
         logger.info("Please set required environment variables (see .env.example)")
         return 1
     
-    logger.info(f"Configuration: scoring_mode={config.scoring_mode}, only_untagged={config.only_untagged}")
+    logger.info(f"Configuration: scoring_mode={config.scoring_mode}, only_untagged={config.only_untagged}, test_mode={config.test_mode}")
     
     logger.info("Step 1: Loading tags from CSV")
     tags_loader = TagsLoader(config.tags_csv_path)
@@ -49,11 +49,10 @@ def main():
     with DatabaseConnection(config.database_url) as db:
         lectures = db.fetch_lectures(only_untagged=config.only_untagged)
     
-    # Test limit for quick testing
-    test_limit = int(os.getenv('TEST_LIMIT', '0'))
-    if test_limit > 0:
-        lectures = lectures[:test_limit]
-        logger.info(f"Limited to {test_limit} lectures for testing")
+    # Test mode: limit lectures for testing
+    if config.test_mode:
+        lectures = lectures[:config.test_mode_limit]
+        logger.info(f"Test mode enabled: limited to {config.test_mode_limit} lectures")
     
     if not lectures:
         logger.error("No lectures found in database")
