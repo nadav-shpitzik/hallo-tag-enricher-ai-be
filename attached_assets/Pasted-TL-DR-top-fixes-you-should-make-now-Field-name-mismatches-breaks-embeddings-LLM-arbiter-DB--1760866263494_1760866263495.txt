@@ -1,0 +1,70 @@
+TL;DR (top fixes you should make now)
+
+Field-name mismatches (breaks embeddings + LLM arbiter).
+
+DB query returns name/description, but embedders/arbiter read lecture_title/lecture_description. Align to one convention (recommend: use the original column names everywhere).
+
+Reasoning mode external id bug.
+
+Writes lecture_external_id using lecture.get('external_id') (always empty) — use lecture_external_id.
+
+CSV output path edge-case.
+
+If output_csv_path has no directory (e.g., tags.csv), os.path.dirname(...) is empty → makedirs('') fails. Guard this.
+
+What’s working well
+
+Two scoring modes wired end-to-end with a clean main orchestrator. Prototype→thresholds→LLM arbiter, and a reasoning scorer path.
+
+Embeddings batching with text-embedding-3-large (good multilingual choice) and sleep between batches.
+
+Lecturer profile caching so the one-time cost is amortized.
+
+Structured Outputs: Arbiter uses JSON Schema to return IDs only—excellent precision safeguard.
+
+Prototype-kNN with per-tag thresholds + low-data blending against tag-label embeddings (exactly the hybrid we specced).
+
+Critical fixes (with exact changes)
+1) Normalize lecture fields across the pipeline
+
+Option A (simplest): change the DB query aliases to the canonical names used by downstream code:
+
+In DatabaseConnection.fetch_lectures, select as lecture_title and lecture_description (not name/description).
+
+Why: EmbeddingsGenerator.generate_lecture_embeddings and LectureScorer both expect those keys.
+
+Additionally: in LectureScorer, the LLM arbiter call still reads lecture.get('lecture_title') / lecture.get('lecture_description') — this is then consistent.
+
+Patch sketch (DB query):
+
+SELECT 
+  id,
+  lecture_external_id,
+  lecture_title,
+  lecture_description,
+  lecturer_name,
+  lecture_tags,
+  lecture_tag_ids
+FROM enriched_lectures
+...
+
+
+(drop the AS name / AS description aliases)
+
+2) Reasoning mode: correct external ID field
+
+In main.py → reasoning block: use lecture['lecture_external_id'] when writing suggestions.
+
+Patch sketch:
+
+'lecture_external_id': lecture.get('lecture_external_id', ''),
+
+3) CSV output path guard
+
+In OutputGenerator.save_to_csv, only makedirs if a directory part exists.
+
+Patch sketch:
+
+dirpath = os.path.dirname(self.config.output_csv_path)
+if dirpath:
+    os.makedirs(dirpath, exist_ok=True)

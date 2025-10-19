@@ -98,10 +98,10 @@ class ReasoningScorer:
         prompt_parts = []
         
         prompt_parts.append("# הרצאה לתיוג\n")
-        prompt_parts.append(f"**כותרת:** {lecture.get('name', 'לא צוין')}\n")
+        prompt_parts.append(f"**כותרת:** {lecture.get('lecture_title', 'לא צוין')}\n")
         
-        if lecture.get('description'):
-            prompt_parts.append(f"**תיאור:** {lecture['description']}\n")
+        if lecture.get('lecture_description'):
+            prompt_parts.append(f"**תיאור:** {lecture['lecture_description']}\n")
         
         if lecture.get('lecturer_name'):
             prompt_parts.append(f"**מרצה:** {lecture['lecturer_name']}\n")

@@ -73,7 +73,7 @@ def main():
                 for sugg in suggestions_dict[lecture_id]:
                     formatted_suggestions.append({
                         'lecture_id': lecture_id,
-                        'lecture_external_id': lecture.get('external_id', ''),
+                        'lecture_external_id': lecture.get('lecture_external_id', ''),
                         'tag_id': sugg['tag_id'],
                         'tag_name_he': sugg['tag_name_he'],
                         'score': sugg['score'],

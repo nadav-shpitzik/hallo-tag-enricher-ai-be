@@ -32,7 +32,9 @@ class OutputGenerator:
             'model'
         ]]
         
-        os.makedirs(os.path.dirname(self.config.output_csv_path), exist_ok=True)
+        dirpath = os.path.dirname(self.config.output_csv_path)
+        if dirpath:
+            os.makedirs(dirpath, exist_ok=True)
         
         df.to_csv(self.config.output_csv_path, index=False, encoding='utf-8-sig')
         
