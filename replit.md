@@ -129,6 +129,8 @@ Generates text report with all lecture details and suggestions
 - `output/suggestions_report.txt` - Human-readable text report
 
 ### Configuration Options
+- `TEST_MODE=true|false` - Enable test mode with limited lectures (default: false)
+- `TEST_MODE_LIMIT=30` - Number of lectures to process in test mode (default: 30)
 - `USE_LLM=true|false` - Enable/disable LLM arbiter (default: true)
 - `WRITE_TO_DB=true|false` - Write to database table (default: false)
 - See `src/config.py` for all tunable parameters
