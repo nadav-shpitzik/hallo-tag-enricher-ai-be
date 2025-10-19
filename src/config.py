@@ -14,7 +14,7 @@ class Config:
     output_csv_path: str
     
     use_llm: bool = True
-    write_to_db: bool = False
+    write_to_db: bool = True  # Phase 2: Enable DB writes for approval workflow
     scoring_mode: str = "reasoning"
     only_untagged: bool = True
     use_shortlist: bool = True
@@ -57,7 +57,7 @@ class Config:
             tags_csv_path=os.getenv("TAGS_CSV_PATH", "data/tags.csv"),
             output_csv_path=os.getenv("OUTPUT_CSV_PATH", "output/tag_suggestions.csv"),
             use_llm=os.getenv("USE_LLM", "true").lower() == "true",
-            write_to_db=os.getenv("WRITE_TO_DB", "false").lower() == "true",
+            write_to_db=os.getenv("WRITE_TO_DB", "true").lower() == "true",  # Default true for Phase 2
             scoring_mode=os.getenv("SCORING_MODE", "reasoning"),
             only_untagged=os.getenv("ONLY_UNTAGGED", "true").lower() == "true",
             use_shortlist=os.getenv("USE_SHORTLIST", "true").lower() == "true",

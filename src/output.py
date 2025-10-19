@@ -61,7 +61,45 @@ class OutputGenerator:
             return
         
         db_connection.create_suggestions_table()
+        
+        # Track which suggestions are new (for event creation)
+        from psycopg2.extras import RealDictCursor
+        existing_pairs = set()
+        with db_connection.connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            cursor.execute("""
+                SELECT lecture_id, tag_id FROM lecture_tag_suggestions
+            """)
+            for row in cursor.fetchall():
+                existing_pairs.add((row['lecture_id'], row['tag_id']))
+        
+        # Upsert suggestions
         db_connection.upsert_suggestions(all_suggestions)
+        
+        # Create initial events for new suggestions only
+        new_count = 0
+        with db_connection.connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            for suggestion in all_suggestions:
+                pair = (suggestion['lecture_id'], suggestion['tag_id'])
+                if pair not in existing_pairs:
+                    # Get the suggestion_id for the newly created record
+                    cursor.execute("""
+                        SELECT suggestion_id FROM lecture_tag_suggestions
+                        WHERE lecture_id = %s AND tag_id = %s
+                    """, (suggestion['lecture_id'], suggestion['tag_id']))
+                    row = cursor.fetchone()
+                    if row:
+                        # Create initial event (suggestion created with pending status)
+                        db_connection.create_event(
+                            suggestion_id=row['suggestion_id'],
+                            action='enqueue',  # Using 'enqueue' to represent initial creation
+                            actor='batch_system',
+                            previous_status=None,
+                            new_status='pending',
+                            details={'model': suggestion['model'], 'score': float(suggestion['score'])}
+                        )
+                        new_count += 1
+        
+        logger.info(f"Saved {len(all_suggestions)} suggestions to database ({new_count} new, {len(all_suggestions) - new_count} updated)")
     
     def generate_qa_report(
         self, 
