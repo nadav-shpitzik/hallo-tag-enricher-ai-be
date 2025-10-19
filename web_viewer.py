@@ -243,13 +243,19 @@ def approve_suggestion(suggestion_id):
     try:
         actor = request.json.get('actor', 'web_user') if request.json else 'web_user'
         
+        print(f"Approving suggestion {suggestion_id} as {actor}")
+        
         with DatabaseConnection(os.getenv('DATABASE_URL')) as db:
             # Attempt update with expected status check
             success, current_status = db.update_suggestion_status(
                 suggestion_id, 'approved', actor, expected_status='pending'
             )
             
+            print(f"Approval result: success={success}, current_status={current_status}")
+            
             if success:
+                # Reload data after approval
+                load_data()
                 return jsonify({'status': 'approved', 'suggestion_id': suggestion_id})
             elif current_status is None:
                 return jsonify({'error': 'Suggestion not found'}), 404
@@ -260,6 +266,9 @@ def approve_suggestion(suggestion_id):
                 }), 409
             
     except Exception as e:
+        print(f"ERROR in approve_suggestion: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/reject/<int:suggestion_id>', methods=['POST'])
