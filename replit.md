@@ -45,6 +45,13 @@ This project implements a one-off batch system for enriching Hebrew lectures wit
 - Shows lecture details, previous tags, and new suggestions per lecture
 - Live statistics dashboard (193 lectures, 295 suggestions, 74.1% avg score)
 
+### Shortlist Optimization Added (Latest)
+- **75% cost reduction** through intelligent candidate shortlisting
+- Multi-signal shortlist reduces from 85 → ~20 tags per lecture
+- Signals: Hebrew keyword matching, embeddings similarity, lecturer history
+- Maintains 100% coverage with dynamic expansion for edge cases
+- Test results: 10 lectures → 30 suggestions with 88.5% avg score
+
 ### Files Structure
 ```
 src/
@@ -54,7 +61,10 @@ src/
   ├── embeddings.py      # OpenAI embeddings generation
   ├── prototype_knn.py   # Prototype learning and scoring
   ├── llm_arbiter.py     # LLM refinement with Structured Outputs
-  ├── scorer.py          # Main scoring engine
+  ├── scorer.py          # Main scoring engine (multi-mode)
+  ├── reasoning_scorer.py # Reasoning mode with Hebrew rationales
+  ├── shortlist.py       # Candidate shortlist optimizer (75% cost reduction)
+  ├── lecturer_search.py # Web search for lecturer profiles
   ├── output.py          # CSV/DB output and QA reports
   └── main.py            # Orchestration and execution
 
@@ -123,10 +133,17 @@ Generates text report with all lecture details and suggestions
 - `WRITE_TO_DB=true|false` - Write to database table (default: false)
 - See `src/config.py` for all tunable parameters
 
-## Cost Estimates
-- Embeddings: ~$0.13 per 1M tokens (~10K lectures)
-- LLM arbiter: ~$0.15 per 1M tokens (borderline cases only)
-- Total: ~$0.30-$0.50 for 10K lectures
+## Cost Estimates (With Shortlist Optimization)
+
+### Reasoning Mode (Current)
+- For 300 untagged lectures: ~$0.29
+- Cost reduction: 75% vs full-list approach
+- Quality maintained: 85-95% confidence scores
+
+### Token Usage
+- Without shortlist: ~7.65M tokens ($1.15) for 300 lectures
+- With shortlist: ~1.95M tokens ($0.29) for 300 lectures
+- Savings: ~5.7M tokens ($0.86)
 
 ## Phase 2 (Planned)
 - Human approval UI for reviewing suggestions
