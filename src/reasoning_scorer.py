@@ -71,8 +71,16 @@ class ReasoningScorer:
                 if sugg.confidence >= self.min_confidence
             ]
             
+            # Create tag_id validation set
+            valid_tag_ids = {tag['tag_id'] for tag in all_tags}
+            
             formatted_suggestions = []
             for sugg in high_confidence_suggestions:
+                # Validate tag_id exists in our tags list
+                if sugg.tag_id not in valid_tag_ids:
+                    logger.warning(f"LLM hallucinated invalid tag_id '{sugg.tag_id}' for tag '{sugg.tag_name_he}' - skipping")
+                    continue
+                    
                 formatted_suggestions.append({
                     'tag_id': sugg.tag_id,
                     'tag_name_he': sugg.tag_name_he,
