@@ -175,11 +175,57 @@ Generates text report with all lecture details and suggestions
 - With shortlist: ~1.95M tokens ($0.29) for 300 lectures
 - Savings: ~5.7M tokens ($0.86)
 
-## Phase 2 (Planned)
-- Human approval UI for reviewing suggestions
-- Airtable API integration for pushing accepted tags
-- Incremental mode (only new/updated lectures)
-- A/B testing for threshold optimization
+## Phase 2: Approval & Airtable Sync Workflow
+
+### 1. Review Suggestions
+**Lecturer-Centric View** (Recommended):
+- Navigate to `/lecturers` in the web viewer
+- See 217 lecturers with 744 unique tags (deduplicated)
+- Each tag shows which lectures contributed to the suggestion
+
+**Lecture-Centric View**:
+- Navigate to `/` in the web viewer
+- See 297 lectures with 858 individual suggestions
+
+### 2. Approve Tags
+- Click "Approve" on individual suggestions
+- Use "Bulk Approve" to approve all suggestions for a lecture
+- Status changes: `pending` → `approved`
+
+### 3. Sync to Airtable
+
+**Prerequisites**:
+- Add secrets via Replit Secrets UI:
+  - `AIRTABLE_API_KEY`: Your personal access token from https://airtable.com/create/tokens
+  - `AIRTABLE_BASE_ID`: Your base ID (starts with "app...")
+
+**Test Connection**:
+```bash
+python sync_to_airtable.py --test-connection
+```
+
+**Dry Run** (see what would be synced):
+```bash
+python sync_to_airtable.py --dry-run
+```
+
+**Actual Sync**:
+```bash
+python sync_to_airtable.py
+```
+
+This will:
+- Group approved suggestions by lecturer
+- Fetch current tags from Airtable מרצים table
+- Add only new tags (preserves existing ones via set-union)
+- Update `status` to `synced` or `failed`
+- Log detailed results
+
+**Features**:
+- ✓ Automatic retry with exponential backoff (3 attempts)
+- ✓ Set-union: never removes existing lecturer tags
+- ✓ Deduplication: one tag per lecturer (not per lecture)
+- ✓ Error tracking: failed syncs logged with reason
 
 ## Dependencies
 - openai (embeddings + LLM)
@@ -189,6 +235,7 @@ Generates text report with all lecture details and suggestions
 - scikit-learn (similarity computations)
 - python-dotenv (environment config)
 - flask (web viewer)
+- pyairtable (Airtable API client)
 
 ## Security Notes
 - Uses read-only database user (recommended)
@@ -200,4 +247,4 @@ Generates text report with all lecture details and suggestions
 - Requires existing tagged lectures to build prototypes (at least 1 per tag)
 - Hebrew-specific (embeddings model supports multilingual but system designed for Hebrew)
 - One-off batch (not incremental by default)
-- Phase 1: No writeback to source tables or Airtable
+- Airtable sync requires manual approval step (by design for quality control)

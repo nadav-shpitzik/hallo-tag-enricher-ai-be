@@ -4,11 +4,61 @@ Syncs approved tag suggestions from database to Airtable מרצים table.
 """
 import logging
 import os
-from typing import List, Dict, Optional, Tuple
+import time
+from typing import List, Dict, Optional, Tuple, Callable, Any
 from pyairtable import Api
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+def retry_with_backoff(
+    func: Callable,
+    max_retries: int = 3,
+    initial_delay: float = 1.0,
+    backoff_factor: float = 2.0,
+    max_delay: float = 30.0
+) -> Callable:
+    """
+    Decorator for retrying a function with exponential backoff.
+    
+    Args:
+        func: Function to retry
+        max_retries: Maximum number of retry attempts (default: 3)
+        initial_delay: Initial delay in seconds (default: 1.0)
+        backoff_factor: Multiplier for delay between retries (default: 2.0)
+        max_delay: Maximum delay between retries in seconds (default: 30.0)
+    
+    Returns:
+        Wrapped function with retry logic
+    """
+    def wrapper(*args, **kwargs) -> Any:
+        delay = initial_delay
+        last_exception = None
+        
+        for attempt in range(max_retries + 1):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                last_exception = e
+                
+                if attempt == max_retries:
+                    logger.error(
+                        f"Failed after {max_retries + 1} attempts: {func.__name__}. "
+                        f"Last error: {e}"
+                    )
+                    raise
+                
+                logger.warning(
+                    f"Attempt {attempt + 1}/{max_retries + 1} failed for {func.__name__}: {e}. "
+                    f"Retrying in {delay:.1f}s..."
+                )
+                
+                time.sleep(delay)
+                delay = min(delay * backoff_factor, max_delay)
+        
+        raise last_exception
+    
+    return wrapper
 
 @dataclass
 class SyncResult:
@@ -70,11 +120,15 @@ class AirtableSync:
         Returns:
             Airtable record dict or None if not found
         """
+        @retry_with_backoff
+        def _get_with_retry():
+            return self.table.get(lecturer_external_id)
+        
         try:
-            record = self.table.get(lecturer_external_id)
+            record = _get_with_retry()
             return record
         except Exception as e:
-            logger.warning(f"Lecturer {lecturer_external_id} not found in Airtable: {e}")
+            logger.warning(f"Lecturer {lecturer_external_id} not found in Airtable after retries: {e}")
             return None
     
     def get_current_tags(self, record: Dict) -> List[str]:
@@ -138,8 +192,12 @@ class AirtableSync:
                 logger.debug(f"No tag changes for lecturer {lecturer_external_id}")
                 return True, None
             
-            # Update Airtable
-            self.table.update(lecturer_external_id, {'תגיות': final_tags})
+            # Update Airtable with retry logic
+            @retry_with_backoff
+            def _update_with_retry():
+                return self.table.update(lecturer_external_id, {'תגיות': final_tags})
+            
+            _update_with_retry()
             
             added_count = len(set(final_tags) - set(current_tags))
             logger.info(
