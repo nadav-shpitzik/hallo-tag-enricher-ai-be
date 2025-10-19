@@ -161,20 +161,49 @@ def get_lecture(lecture_id):
 def rerun_batch():
     """Trigger batch processing in background."""
     def run_batch():
+        print("\n" + "="*80)
+        print("🔄 RERUN TRIGGERED FROM WEB INTERFACE")
+        print("="*80)
+        print(f"⏰ Started at: {pd.Timestamp.now()}")
+        print("📊 Running batch processing with live logs below...")
+        print("="*80 + "\n")
+        
         try:
-            result = subprocess.run(
+            process = subprocess.Popen(
                 ['python', 'src/main.py'],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
-                timeout=300
+                bufsize=1,
+                universal_newlines=True
             )
-            print(f"Batch completed with exit code: {result.returncode}")
-            if result.returncode == 0:
+            
+            for line in process.stdout:
+                print(line, end='', flush=True)
+            
+            process.wait(timeout=300)
+            
+            print("\n" + "="*80)
+            print(f"✅ Batch completed with exit code: {process.returncode}")
+            print(f"⏰ Finished at: {pd.Timestamp.now()}")
+            print("="*80 + "\n")
+            
+            if process.returncode == 0:
+                print("🔄 Reloading data into web viewer...")
                 load_data()
+                print("✅ Data reloaded successfully!")
+            else:
+                print(f"❌ Batch failed with exit code: {process.returncode}")
+                
         except subprocess.TimeoutExpired:
-            print("Batch processing timed out after 5 minutes")
+            print("\n" + "="*80)
+            print("⚠️ Batch processing timed out after 5 minutes")
+            print("="*80 + "\n")
+            process.kill()
         except Exception as e:
-            print(f"Error running batch: {e}")
+            print("\n" + "="*80)
+            print(f"❌ Error running batch: {e}")
+            print("="*80 + "\n")
     
     thread = threading.Thread(target=run_batch)
     thread.daemon = True
@@ -182,7 +211,7 @@ def rerun_batch():
     
     return jsonify({
         'status': 'started',
-        'message': 'Batch processing started in background. Refresh the page in a few minutes to see new results.'
+        'message': 'Batch processing started! Check the console logs to see progress in real-time.'
     })
 
 if __name__ == '__main__':
