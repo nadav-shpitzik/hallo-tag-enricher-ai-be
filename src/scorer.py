@@ -28,10 +28,6 @@ class LectureScorer:
                 logger.warning(f"No embedding for lecture {lecture_id}, skipping")
                 continue
             
-            embedding = lecture_embeddings[lecture_id]
-            
-            scores = self.prototype_knn.score_lecture(embedding, tag_embeddings)
-            
             existing_tag_ids = set()
             raw_tags = lecture.get('lecture_tag_ids', [])
             if raw_tags:
@@ -42,9 +38,12 @@ class LectureScorer:
                 else:
                     logger.warning(f"Unexpected type for lecture_tag_ids: {type(raw_tags)}")
             
-            for tag_id in list(existing_tag_ids):
-                if tag_id in scores:
-                    del scores[tag_id]
+            if existing_tag_ids:
+                continue
+            
+            embedding = lecture_embeddings[lecture_id]
+            
+            scores = self.prototype_knn.score_lecture(embedding, tag_embeddings)
             
             if self.config.use_llm and llm_arbiter and scores:
                 llm_selected = llm_arbiter.refine_suggestions(

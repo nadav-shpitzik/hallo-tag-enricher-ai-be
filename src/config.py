@@ -29,9 +29,9 @@ class Config:
     label_weight: float = 0.2
     
     target_precision: float = 0.90
-    min_confidence_threshold: float = 0.65
+    min_confidence_threshold: float = 0.60
     high_confidence_threshold: float = 0.80
-    llm_borderline_lower: float = 0.55
+    llm_borderline_lower: float = 0.50
     llm_borderline_upper: float = 0.80
     
     top_k_tags: int = 7
