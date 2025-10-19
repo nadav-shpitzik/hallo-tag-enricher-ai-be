@@ -20,6 +20,27 @@ app.config['JSON_AS_ASCII'] = False
 suggestions_df = None
 lectures_cache = {}
 tags_map = {}
+last_csv_mtime = None
+
+def check_and_reload_if_needed():
+    """Check if CSV file has been modified and reload data if needed."""
+    global last_csv_mtime
+    
+    csv_path = os.getenv('OUTPUT_CSV_PATH', 'output/tag_suggestions.csv')
+    if not os.path.exists(csv_path):
+        return False
+    
+    current_mtime = os.path.getmtime(csv_path)
+    
+    # Reload if this is the first check or file has been modified
+    if last_csv_mtime is None or current_mtime > last_csv_mtime:
+        print(f"🔄 CSV file changed, reloading data... (mtime: {current_mtime})")
+        if load_data():
+            last_csv_mtime = current_mtime
+            return True
+        return False
+    
+    return True
 
 def load_data():
     """Load suggestions, lectures, and tags on startup."""
@@ -64,6 +85,9 @@ def load_data():
 @app.route('/')
 def index():
     """Main page with all suggestions."""
+    # Check if data needs reloading (e.g., CSV file updated)
+    check_and_reload_if_needed()
+    
     if suggestions_df is None:
         return "Error: Data not loaded. Check console for errors.", 500
     
@@ -215,7 +239,7 @@ def rerun_batch():
     })
 
 if __name__ == '__main__':
-    if load_data():
+    if check_and_reload_if_needed():
         print("Starting web viewer on http://0.0.0.0:5000")
         app.run(host='0.0.0.0', port=5000, debug=False)
     else:

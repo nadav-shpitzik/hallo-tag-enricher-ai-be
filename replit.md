@@ -43,7 +43,8 @@ This project implements a one-off batch system for enriching Hebrew lectures wit
 - Features: filterable by score, tag name, model type, previous tags status
 - Hebrew RTL support with responsive design
 - Shows lecture details, previous tags, and new suggestions per lecture
-- Live statistics dashboard (193 lectures, 295 suggestions, 74.1% avg score)
+- **Auto-reload**: Automatically detects CSV file changes and refreshes data on page load
+- Live statistics dashboard (297 lectures, 855 suggestions, 87.8% avg score)
 
 ### Shortlist Optimization Added (Latest)
 - **75% cost reduction** through intelligent candidate shortlisting
