@@ -268,6 +268,12 @@ class ShortlistGenerator:
             lecturer = lecture.get('lecturer_name')
             tag_ids = lecture.get('lecture_tag_ids', [])
             
+            # Normalize tag_ids to list (handle comma-strings)
+            if isinstance(tag_ids, str):
+                tag_ids = [tid.strip() for tid in tag_ids.split(',') if tid.strip()]
+            elif not isinstance(tag_ids, list):
+                tag_ids = []
+            
             if not lecturer or not tag_ids:
                 continue
                 

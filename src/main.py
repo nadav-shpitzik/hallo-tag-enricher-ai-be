@@ -72,7 +72,12 @@ def main():
             logger.info("Step 3b: Generating embeddings for shortlist")
             from shortlist import ShortlistGenerator
             
-            shortlist_gen = ShortlistGenerator()
+            shortlist_gen = ShortlistGenerator(
+                max_candidates=config.max_llm_candidates,
+                k_label=10,
+                k_proto=12,
+                k_prior=5
+            )
             embeddings_gen = EmbeddingsGenerator(config.openai_api_key, config.embedding_model)
             
             # Generate lecture embeddings
