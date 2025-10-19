@@ -1,0 +1,67 @@
+What’s good now
+
+Config: sensible thresholds/caps are centralized (e.g., min_confidence_threshold=0.60, high_confidence_threshold=0.80, llm_borderline_[lower,upper]=0.50..0.80, max_llm_candidates=20).
+
+DB fetch: returns lecture_title, lecture_description, with an untagged filter and a stable ordering.
+
+Main orchestration: reasoning path loads tags, fetches lectures, builds lecturer profiles, and calls the reasoning scorer; prototype path remains cleanly separated.
+
+Reasoning scorer: supports candidate_tags (exactly what we need), enforces 85%+ confidence, and returns structured, Hebrew rationales.
+
+Prototype scorer: thresholding + optional LLM arbiter are implemented and gated by config.
+
+What’s missing for the shortlist
+
+In reasoning mode, you call score_batch(..., tags_list, lecturer_profiles) and inside it you pass candidate_tags=None to score_lecture. So the LLM still receives all tags. Wire the shortlist in.
+
+Minimal, recall-safe shortlist (drop-in plan)
+
+Goal: give the LLM ~20–25 best candidates per lecture, but keep very high recall.
+
+Compute quick signals (reasoning mode)
+
+Add an embeddings step only for:
+a) lecture texts ([כותרת]…[תיאור]…) and
+b) tag label texts (from get_tag_label_texts() already in use).
+
+Use your existing EmbeddingsGenerator with text-embedding-3-large. Store in local dicts.
+
+Build the shortlist (per lecture)
+
+Union of signals (recall-first):
+
+Keyword hits: any tag with name_he/synonyms_he found in title/description (no cap).
+
+Prototype similarity top-K (if you have prototypes available from prior runs; otherwise skip this piece in reasoning mode).
+
+Label similarity top-K: cosine(lecture, tag_label_embedding).
+
+Lecturer prior top-K: frequent tag co-occurrence for that lecturer (if you keep those stats).
+
+Caps / thresholds (safe defaults):
+
+K_proto=12, K_label=10, K_prior=5, Max=25.
+
+Must-include any tag with proto ≥0.42 or label ≥0.46.
+
+If lecture looks “hard” (both top proto/label <0.55 and no keyword hits), allow Max=40 for that lecture.
+
+Call the LLM with the shortlist
+
+Pass candidate_tags=<per-lecture subset> to ReasoningScorer.score_lecture(...). This is already supported.
+
+Safety fallback (per lecture)
+
+If LLM returns 0 tags at ≥0.85 confidence, retry once with the full tag list for that lecture (guarantees recall).
+
+Tiny wiring guide (where to put it)
+
+In main.py reasoning section, after fetching lectures and before score_batch(...):
+
+Generate lecture/tag embeddings.
+
+For each lecture, compute shortlist (per above) and keep a dict[lecture_id] -> [candidate_tag_dicts].
+
+Update ReasoningScorer.score_batch(...) (or a small wrapper) to pass the per-lecture candidate_tags into score_lecture(...). Currently it always passes None.
+
+With this, you’ll cut tokens ~3–4× while keeping ~98%+ Recall@shortlist in practice. If you want, I can sketch the exact shortlist helper in pseudo right where you need it in main.py.
