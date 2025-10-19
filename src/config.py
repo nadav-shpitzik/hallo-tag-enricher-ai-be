@@ -40,7 +40,7 @@ class Config:
     
     top_k_tags: int = 7
     min_k_tags: int = 3
-    max_llm_candidates: int = 20
+    max_llm_candidates: int = 25
     
     batch_size_embeddings: int = 512
     batch_size_llm: int = 1
