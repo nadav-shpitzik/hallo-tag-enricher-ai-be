@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>מערכת הצעות תגיות - Tag Suggestions Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f7fa;
+            color: #2c3e50;
+            line-height: 1.6;
+            direction: rtl;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .header .subtitle {
+            opacity: 0.9;
+            font-size: 1rem;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            text-align: center;
+        }
+        
+        .stat-card .number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-card .label {
+            color: #7f8c8d;
+            font-size: 0.9rem;
+        }
+        
+        .filters {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 2rem;
+        }
+        
+        .filters h2 {
+            margin-bottom: 1rem;
+            color: #2c3e50;
+            font-size: 1.3rem;
+        }
+        
+        .filter-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+        
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .filter-group label {
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: #34495e;
+            font-size: 0.9rem;
+        }
+        
+        .filter-group input,
+        .filter-group select {
+            padding: 0.75rem;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+        
+        .filter-group input:focus,
+        .filter-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .filter-actions {
+            margin-top: 1rem;
+            display: flex;
+            gap: 1rem;
+        }
+        
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 600;
+        }
+        
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-secondary {
+            background: #e0e0e0;
+            color: #2c3e50;
+        }
+        
+        .btn-secondary:hover {
+            background: #d0d0d0;
+        }
+        
+        .lecture-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 1.5rem;
+            overflow: hidden;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        
+        .lecture-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.12);
+        }
+        
+        .lecture-header {
+            background: linear-gradient(135deg, #f5f7fa 0%, #e8eef5 100%);
+            padding: 1.5rem;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        
+        .lecture-id {
+            background: #667eea;
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            display: inline-block;
+            margin-bottom: 0.5rem;
+        }
+        
+        .lecture-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 0.5rem;
+        }
+        
+        .lecturer-info {
+            color: #7f8c8d;
+            font-size: 0.95rem;
+        }
+        
+        .lecturer-info .name {
+            font-weight: 600;
+            color: #34495e;
+        }
+        
+        .price {
+            color: #27ae60;
+            font-weight: bold;
+            font-size: 1.1rem;
+            margin-top: 0.5rem;
+        }
+        
+        .lecture-body {
+            padding: 1.5rem;
+        }
+        
+        .description {
+            color: #555;
+            margin-bottom: 1.5rem;
+            line-height: 1.7;
+            border-right: 4px solid #667eea;
+            padding-right: 1rem;
+        }
+        
+        .tags-section {
+            margin-bottom: 1.5rem;
+        }
+        
+        .section-title {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .tags-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        
+        .tag {
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+        
+        .tag-previous {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border: 2px solid #4caf50;
+        }
+        
+        .suggestion-item {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 0.75rem;
+            border-right: 4px solid #667eea;
+        }
+        
+        .suggestion-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        
+        .suggestion-tag {
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .suggestion-meta {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        
+        .score {
+            background: #667eea;
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+        
+        .score.high {
+            background: #27ae60;
+        }
+        
+        .score.medium {
+            background: #f39c12;
+        }
+        
+        .model-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        
+        .model-llm {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        
+        .model-prototype {
+            background: #fce4ec;
+            color: #c2185b;
+        }
+        
+        .rationale {
+            color: #666;
+            font-size: 0.9rem;
+            font-style: italic;
+            margin-top: 0.5rem;
+        }
+        
+        .no-results {
+            text-align: center;
+            padding: 3rem;
+            color: #7f8c8d;
+        }
+        
+        .no-results svg {
+            width: 100px;
+            height: 100px;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            .header h1 {
+                font-size: 1.5rem;
+            }
+            
+            .filter-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .stats {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>🏷️ מערכת הצעות תגיות AI</h1>
+            <p class="subtitle">מערכת אוטומטית להצעת תגיות להרצאות בעברית</p>
+        </div>
+    </div>
+    
+    <div class="container">
+        <div class="stats">
+            <div class="stat-card">
+                <div class="number">{{ stats.total_lectures }}</div>
+                <div class="label">הרצאות עם הצעות</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">{{ stats.total_suggestions }}</div>
+                <div class="label">סה"כ הצעות תגיות</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">{{ "%.1f"|format(stats.avg_score * 100) }}%</div>
+                <div class="label">ציון ממוצע</div>
+            </div>
+            <div class="stat-card">
+                <div class="number">{{ stats.llm_count }}</div>
+                <div class="label">משוכללות LLM</div>
+            </div>
+        </div>
+        
+        <div class="filters">
+            <h2>🔍 סינון תוצאות</h2>
+            <form method="get" action="/">
+                <div class="filter-grid">
+                    <div class="filter-group">
+                        <label for="min_score">ציון מינימלי:</label>
+                        <input type="number" id="min_score" name="min_score" 
+                               min="0" max="1" step="0.01" 
+                               value="{{ filters.min_score }}" 
+                               placeholder="0.0">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label for="max_score">ציון מקסימלי:</label>
+                        <input type="number" id="max_score" name="max_score" 
+                               min="0" max="1" step="0.01" 
+                               value="{{ filters.max_score if filters.max_score < 1 else '' }}" 
+                               placeholder="1.0">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label for="tag">תגית (חיפוש חופשי):</label>
+                        <input type="text" id="tag" name="tag" 
+                               value="{{ filters.tag }}" 
+                               placeholder="לדוגמה: חדשנות">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label for="model">סוג מודל:</label>
+                        <select id="model" name="model">
+                            <option value="">הכל</option>
+                            <option value="llm" {% if filters.model == 'llm' %}selected{% endif %}>LLM בלבד</option>
+                            <option value="prototype" {% if filters.model == 'prototype' %}selected{% endif %}>Prototype בלבד</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label for="has_prev_tags">תגיות קודמות:</label>
+                        <select id="has_prev_tags" name="has_prev_tags">
+                            <option value="">הכל</option>
+                            <option value="yes" {% if filters.has_prev_tags == 'yes' %}selected{% endif %}>עם תגיות קודמות</option>
+                            <option value="no" {% if filters.has_prev_tags == 'no' %}selected{% endif %}>ללא תגיות קודמות</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="filter-actions">
+                    <button type="submit" class="btn btn-primary">🔍 סנן תוצאות</button>
+                    <a href="/" class="btn btn-secondary">🔄 איפוס</a>
+                </div>
+            </form>
+        </div>
+        
+        {% if lectures %}
+            {% for lecture in lectures %}
+            <div class="lecture-card">
+                <div class="lecture-header">
+                    <span class="lecture-id">ID: {{ lecture.lecture_id }}</span>
+                    <div class="lecture-title">{{ lecture.title or '—' }}</div>
+                    <div class="lecturer-info">
+                        <span class="name">👨‍🏫 {{ lecture.lecturer_name or '—' }}</span>
+                        {% if lecture.lecturer_role %}
+                        <span> • {{ lecture.lecturer_role }}</span>
+                        {% endif %}
+                    </div>
+                    {% if lecture.price %}
+                    <div class="price">💰 ₪{{ "{:,}".format(lecture.price) }}</div>
+                    {% endif %}
+                </div>
+                
+                <div class="lecture-body">
+                    {% if lecture.description %}
+                    <div class="description">
+                        {{ lecture.description[:300] }}{% if lecture.description|length > 300 %}...{% endif %}
+                    </div>
+                    {% endif %}
+                    
+                    {% if lecture.previous_tags %}
+                    <div class="tags-section">
+                        <div class="section-title">
+                            🏷️ תגיות קיימות ({{ lecture.previous_tags|length }})
+                        </div>
+                        <div class="tags-container">
+                            {% for tag in lecture.previous_tags %}
+                            <span class="tag tag-previous">{{ tag }}</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    
+                    <div class="tags-section">
+                        <div class="section-title">
+                            ✨ הצעות חדשות ({{ lecture.suggestion_count }})
+                        </div>
+                        {% for suggestion in lecture.suggestions %}
+                        <div class="suggestion-item">
+                            <div class="suggestion-header">
+                                <span class="suggestion-tag">{{ suggestion.tag_name }}</span>
+                                <div class="suggestion-meta">
+                                    <span class="score {% if suggestion.score >= 0.8 %}high{% elif suggestion.score >= 0.7 %}medium{% endif %}">
+                                        {{ "%.1f"|format(suggestion.score * 100) }}%
+                                    </span>
+                                    <span class="model-badge {% if suggestion.is_llm %}model-llm{% else %}model-prototype{% endif %}">
+                                        {% if suggestion.is_llm %}🤖 LLM{% else %}📊 Prototype{% endif %}
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="rationale">{{ suggestion.rationale }}</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="no-results">
+                <h2>😔 לא נמצאו תוצאות</h2>
+                <p>נסה לשנות את הפילטרים או לאפס אותם</p>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>
