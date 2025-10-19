@@ -46,40 +46,67 @@ This project implements a one-off batch system for enriching Hebrew lectures wit
 - **Auto-reload**: Automatically detects CSV file changes and refreshes data on page load
 - Live statistics dashboard (297 lectures, 855 suggestions, 87.8% avg score)
 
-### Shortlist Optimization Added (Latest)
+### Shortlist Optimization Added
 - **75% cost reduction** through intelligent candidate shortlisting
 - Multi-signal shortlist reduces from 85 → ~20 tags per lecture
 - Signals: Hebrew keyword matching, embeddings similarity, lecturer history
 - Maintains 100% coverage with dynamic expansion for edge cases
 - Test results: 10 lectures → 30 suggestions with 88.5% avg score
 
+### Phase 2: Approval Workflow & Airtable Sync (Latest)
+- **Database-backed approval workflow** with atomic state machine
+  - Status transitions: pending → approved/rejected → synced/failed
+  - Race-condition-free updates with WHERE clause validation
+  - 409 Conflict responses for concurrent modification attempts
+  - Audit trail: approved_by, approved_at, synced_at timestamps
+- **Web UI for review and approval**
+  - Dual views: lecture-centric and lecturer-centric (deduplicated)
+  - Per-suggestion approve/reject controls with status badges
+  - Bulk approve for entire lectures
+  - Lecturer view shows 217 lecturers with 744 unique tags
+- **Airtable Integration**
+  - pyairtable SDK for accessing מרצים (lecturers) table
+  - Set-union tag updates (preserves existing + adds new)
+  - CLI sync command with dry-run mode
+  - Automatic status tracking (synced/failed with error messages)
+- **Tag hallucination prevention**
+  - LLM validation: only accept tag_ids that exist in tags.csv
+  - Warning logs for hallucinated tags (e.g., "mediatag", typos)
+
 ### Files Structure
 ```
 src/
   ├── config.py          # Configuration from environment
-  ├── database.py        # PostgreSQL connection (read-only)
+  ├── database.py        # PostgreSQL connection with approval workflow methods
   ├── tags_loader.py     # CSV loading and normalization
   ├── embeddings.py      # OpenAI embeddings generation
   ├── prototype_knn.py   # Prototype learning and scoring
   ├── llm_arbiter.py     # LLM refinement with Structured Outputs
   ├── scorer.py          # Main scoring engine (multi-mode)
-  ├── reasoning_scorer.py # Reasoning mode with Hebrew rationales
+  ├── reasoning_scorer.py # Reasoning mode with Hebrew rationales + validation
   ├── shortlist.py       # Candidate shortlist optimizer (75% cost reduction)
   ├── lecturer_search.py # Web search for lecturer profiles
+  ├── airtable_sync.py   # Airtable API client for מרצים table
+  ├── sync_worker.py     # Coordinates database → Airtable sync
   ├── output.py          # CSV/DB output and QA reports
   └── main.py            # Orchestration and execution
 
 data/
   └── tags.csv           # Tags with Hebrew names and synonyms
 
+db/migrations/
+  └── 001_add_approval_workflow.sql  # Approval workflow schema
+
 output/                  # Generated suggestions (gitignored)
   ├── tag_suggestions.csv      # Main output (295 suggestions)
   └── suggestions_report.txt   # Text report for review
 
-web_viewer.py            # Flask web viewer for browsing results
+web_viewer.py            # Flask web viewer with approval UI
+sync_to_airtable.py      # CLI command for Airtable sync
 view_results.py          # CLI script for text-based viewing
 templates/
-  └── index.html         # Web viewer HTML template
+  ├── index.html         # Lecture-centric view
+  └── lecturers.html     # Lecturer-centric view (deduplicated)
 ```
 
 ## User Preferences
