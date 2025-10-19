@@ -25,82 +25,113 @@ app.config['JSON_AS_ASCII'] = False
 suggestions_df = None
 lectures_cache = {}
 tags_map = {}
-last_csv_mtime = None
-
-def check_and_reload_if_needed():
-    """Check if CSV file has been modified and reload data if needed."""
-    global last_csv_mtime
-    
-    csv_path = os.getenv('OUTPUT_CSV_PATH', 'output/tag_suggestions.csv')
-    if not os.path.exists(csv_path):
-        return False
-    
-    current_mtime = os.path.getmtime(csv_path)
-    
-    # Reload if this is the first check or file has been modified
-    if last_csv_mtime is None or current_mtime > last_csv_mtime:
-        print(f"🔄 CSV file changed, reloading data... (mtime: {current_mtime})")
-        if load_data():
-            last_csv_mtime = current_mtime
-            return True
-        return False
-    
-    return True
 
 def load_data():
-    """Load suggestions, lectures, and tags on startup."""
+    """Load suggestions, lectures, and tags from database."""
     global suggestions_df, lectures_cache, tags_map
     
-    csv_path = os.getenv('OUTPUT_CSV_PATH', 'output/tag_suggestions.csv')
-    if not os.path.exists(csv_path):
-        print(f"Error: No suggestions file found at {csv_path}")
+    # Load tags mapping
+    tags_csv = 'data/tags.csv'
+    if not os.path.exists(tags_csv):
+        print(f"Error: Tags file not found at {tags_csv}")
         return False
     
-    suggestions_df = pd.read_csv(csv_path)
-    
-    tags_csv = 'data/tags.csv'
     tags_df = pd.read_csv(tags_csv)
     tags_map = dict(zip(tags_df['tag_id'], tags_df['name_he']))
     
-    conn = psycopg2.connect(os.getenv('DATABASE_URL'))
-    lecture_ids = suggestions_df['lecture_id'].unique().tolist()
+    # Load suggestions from database
+    with DatabaseConnection(os.getenv('DATABASE_URL')) as db:
+        with db.connection.cursor(cursor_factory=RealDictCursor) as cur:
+            # Get all suggestions with their status
+            cur.execute("""
+                SELECT 
+                    suggestion_id,
+                    lecture_id,
+                    tag_id,
+                    score,
+                    rationale,
+                    model,
+                    status,
+                    approved_by,
+                    approved_at,
+                    synced_at,
+                    created_at
+                FROM lecture_tag_suggestions
+                ORDER BY created_at DESC
+            """)
+            suggestions = cur.fetchall()
+            
+            if not suggestions:
+                print("No suggestions found in database")
+                suggestions_df = pd.DataFrame()
+                return True
+            
+            # Convert to DataFrame
+            suggestions_df = pd.DataFrame([dict(s) for s in suggestions])
+            suggestions_df['tag_name_he'] = suggestions_df['tag_id'].map(tags_map)
+            
+            # Get unique lecture IDs
+            lecture_ids = suggestions_df['lecture_id'].unique().tolist()
+            
+            # Load lecture details
+            cur.execute("""
+                SELECT 
+                    id,
+                    lecture_external_id,
+                    lecture_title,
+                    lecture_description,
+                    lecturer_name,
+                    lecturer_role,
+                    lecture_tag_ids,
+                    final_price
+                FROM enriched_lectures
+                WHERE id = ANY(%s)
+            """, (lecture_ids,))
+            
+            for row in cur.fetchall():
+                lectures_cache[row['id']] = dict(row)
     
-    with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute("""
-            SELECT 
-                id,
-                lecture_external_id,
-                lecture_title,
-                lecture_description,
-                lecturer_name,
-                lecturer_role,
-                lecture_tag_ids,
-                final_price
-            FROM enriched_lectures
-            WHERE id = ANY(%s)
-        """, (lecture_ids,))
-        
-        for row in cur.fetchall():
-            lectures_cache[row['id']] = dict(row)
-    
-    conn.close()
-    print(f"Loaded {len(suggestions_df)} suggestions for {len(lectures_cache)} lectures")
+    print(f"Loaded {len(suggestions_df)} suggestions for {len(lectures_cache)} lectures from database")
     return True
 
 @app.route('/')
 def index():
     """Main page with all suggestions."""
-    # Check if data needs reloading (e.g., CSV file updated)
-    check_and_reload_if_needed()
+    # Reload data on each request to show latest status
+    load_data()
     
-    if suggestions_df is None:
-        return "Error: Data not loaded. Check console for errors.", 500
+    # Handle empty database gracefully
+    if suggestions_df is None or suggestions_df.empty:
+        return render_template('index.html', 
+                             lectures=[],
+                             unique_tags=[],
+                             stats={
+                                 'total_lectures': 0,
+                                 'total_suggestions': 0,
+                                 'avg_score': 0,
+                                 'llm_count': 0,
+                                 'prototype_count': 0,
+                                 'pending_count': 0,
+                                 'approved_count': 0,
+                                 'rejected_count': 0,
+                                 'synced_count': 0,
+                                 'failed_count': 0
+                             },
+                             filters={
+                                 'min_score': 0.0,
+                                 'max_score': 1.0,
+                                 'tag': '',
+                                 'model': '',
+                                 'has_prev_tags': '',
+                                 'status': ''
+                             })
     
     min_score = float(request.args.get('min_score', 0.0))
     max_score = float(request.args.get('max_score', 1.0))
     tag_filter = request.args.get('tag', '')
     model_filter = request.args.get('model', '')
     has_prev_tags = request.args.get('has_prev_tags', '')
+    status_filter = request.args.get('status', '')
     
     filtered_df = suggestions_df.copy()
     
@@ -112,6 +143,8 @@ def index():
         filtered_df = filtered_df[filtered_df['tag_name_he'].str.contains(tag_filter, na=False)]
     if model_filter:
         filtered_df = filtered_df[filtered_df['model'].str.contains(model_filter, na=False)]
+    if status_filter:
+        filtered_df = filtered_df[filtered_df['status'] == status_filter]
     
     grouped = filtered_df.groupby('lecture_id')
     
@@ -130,12 +163,17 @@ def index():
         suggestions_list = []
         for _, sugg in suggestions.iterrows():
             suggestions_list.append({
+                'suggestion_id': int(sugg['suggestion_id']),
                 'tag_name': sugg['tag_name_he'],
                 'tag_id': sugg['tag_id'],
                 'score': float(sugg['score']),
                 'rationale': sugg['rationale'],
                 'model': sugg['model'],
-                'is_llm': 'llm' in sugg['model'].lower()
+                'is_llm': 'llm' in sugg['model'].lower(),
+                'status': sugg['status'],
+                'approved_by': sugg.get('approved_by'),
+                'approved_at': sugg.get('approved_at'),
+                'synced_at': sugg.get('synced_at')
             })
         
         lectures_data.append({
@@ -155,12 +193,20 @@ def index():
     
     unique_tags = sorted(suggestions_df['tag_name_he'].unique().tolist())
     
+    # Calculate status-based statistics
+    status_counts = suggestions_df['status'].value_counts().to_dict()
+    
     stats = {
         'total_lectures': len(lectures_data),
         'total_suggestions': len(filtered_df),
         'avg_score': float(filtered_df['score'].mean()) if len(filtered_df) > 0 else 0,
         'llm_count': len(filtered_df[filtered_df['model'].str.contains('llm', case=False)]),
-        'prototype_count': len(filtered_df[~filtered_df['model'].str.contains('llm', case=False)])
+        'prototype_count': len(filtered_df[~filtered_df['model'].str.contains('llm', case=False)]),
+        'pending_count': status_counts.get('pending', 0),
+        'approved_count': status_counts.get('approved', 0),
+        'rejected_count': status_counts.get('rejected', 0),
+        'synced_count': status_counts.get('synced', 0),
+        'failed_count': status_counts.get('failed', 0)
     }
     
     return render_template('index.html', 
@@ -172,7 +218,8 @@ def index():
                              'max_score': max_score,
                              'tag': tag_filter,
                              'model': model_filter,
-                             'has_prev_tags': has_prev_tags
+                             'has_prev_tags': has_prev_tags,
+                             'status': status_filter
                          })
 
 @app.route('/api/lecture/<int:lecture_id>')
@@ -343,7 +390,7 @@ def rerun_batch():
     })
 
 if __name__ == '__main__':
-    if check_and_reload_if_needed():
+    if load_data():
         print("Starting web viewer on http://0.0.0.0:5000")
         app.run(host='0.0.0.0', port=5000, debug=False)
     else:

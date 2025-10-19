@@ -44,7 +44,7 @@
         
         .stats {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
             gap: 1rem;
             margin-bottom: 2rem;
         }
@@ -58,7 +58,7 @@
         }
         
         .stat-card .number {
-            font-size: 2.5rem;
+            font-size: 2rem;
             font-weight: bold;
             color: #667eea;
             margin-bottom: 0.5rem;
@@ -66,8 +66,14 @@
         
         .stat-card .label {
             color: #7f8c8d;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
         }
+        
+        .stat-card.pending .number { color: #f39c12; }
+        .stat-card.approved .number { color: #27ae60; }
+        .stat-card.rejected .number { color: #e74c3c; }
+        .stat-card.synced .number { color: #3498db; }
+        .stat-card.failed .number { color: #c0392b; }
         
         .filters {
             background: white;
@@ -85,7 +91,7 @@
         
         .filter-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 1rem;
         }
         
@@ -132,6 +138,11 @@
             font-weight: 600;
         }
         
+        .btn-sm {
+            padding: 0.4rem 0.8rem;
+            font-size: 0.85rem;
+        }
+        
         .btn-primary {
             background: #667eea;
             color: white;
@@ -143,6 +154,24 @@
             box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
         }
         
+        .btn-success {
+            background: #27ae60;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #229954;
+        }
+        
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+        
         .btn-secondary {
             background: #e0e0e0;
             color: #2c3e50;
@@ -150,6 +179,11 @@
         
         .btn-secondary:hover {
             background: #d0d0d0;
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
         
         .lecture-card {
@@ -229,6 +263,7 @@
             display: flex;
             align-items: center;
             gap: 0.5rem;
+            justify-content: space-between;
         }
         
         .tags-container {
@@ -258,6 +293,21 @@
             border-right: 4px solid #667eea;
         }
         
+        .suggestion-item.approved {
+            border-right-color: #27ae60;
+            background: #f0fdf4;
+        }
+        
+        .suggestion-item.rejected {
+            border-right-color: #e74c3c;
+            background: #fef2f2;
+        }
+        
+        .suggestion-item.synced {
+            border-right-color: #3498db;
+            background: #eff6ff;
+        }
+        
         .suggestion-header {
             display: flex;
             align-items: center;
@@ -276,7 +326,8 @@
         .suggestion-meta {
             display: flex;
             align-items: center;
-            gap: 1rem;
+            gap: 0.75rem;
+            flex-wrap: wrap;
         }
         
         .score {
@@ -296,6 +347,38 @@
             background: #f39c12;
         }
         
+        .status-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .status-approved {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-rejected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status-synced {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .status-failed {
+            background: #f5c6cb;
+            color: #721c24;
+        }
+        
         .model-badge {
             padding: 0.25rem 0.75rem;
             border-radius: 20px;
@@ -313,11 +396,29 @@
             color: #c2185b;
         }
         
+        .suggestion-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+        
         .rationale {
             color: #666;
             font-size: 0.9rem;
             font-style: italic;
             margin-top: 0.5rem;
+        }
+        
+        .approval-meta {
+            font-size: 0.85rem;
+            color: #7f8c8d;
+            margin-top: 0.5rem;
+        }
+        
+        .bulk-actions {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
         }
         
         .no-results {
@@ -349,6 +450,10 @@
             .stats {
                 grid-template-columns: 1fr;
             }
+            
+            .bulk-actions {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
@@ -373,17 +478,29 @@
                 <div class="number">{{ stats.total_lectures }}</div>
                 <div class="label">הרצאות עם הצעות</div>
             </div>
-            <div class="stat-card">
-                <div class="number">{{ stats.total_suggestions }}</div>
-                <div class="label">סה"כ הצעות תגיות</div>
+            <div class="stat-card pending">
+                <div class="number">{{ stats.pending_count }}</div>
+                <div class="label">⏳ ממתינות לאישור</div>
+            </div>
+            <div class="stat-card approved">
+                <div class="number">{{ stats.approved_count }}</div>
+                <div class="label">✓ מאושרות</div>
+            </div>
+            <div class="stat-card rejected">
+                <div class="number">{{ stats.rejected_count }}</div>
+                <div class="label">✗ נדחות</div>
+            </div>
+            <div class="stat-card synced">
+                <div class="number">{{ stats.synced_count }}</div>
+                <div class="label">↻ סונכרנו</div>
+            </div>
+            <div class="stat-card failed">
+                <div class="number">{{ stats.failed_count }}</div>
+                <div class="label">⚠ נכשלו</div>
             </div>
             <div class="stat-card">
                 <div class="number">{{ "%.1f"|format(stats.avg_score * 100) }}%</div>
                 <div class="label">ציון ממוצע</div>
-            </div>
-            <div class="stat-card">
-                <div class="number">{{ stats.llm_count }}</div>
-                <div class="label">משוכללות LLM</div>
             </div>
         </div>
         
@@ -391,6 +508,18 @@
             <h2>🔍 סינון תוצאות</h2>
             <form method="get" action="/">
                 <div class="filter-grid">
+                    <div class="filter-group">
+                        <label for="status">סטטוס:</label>
+                        <select id="status" name="status">
+                            <option value="">הכל</option>
+                            <option value="pending" {% if filters.status == 'pending' %}selected{% endif %}>⏳ ממתין</option>
+                            <option value="approved" {% if filters.status == 'approved' %}selected{% endif %}>✓ מאושר</option>
+                            <option value="rejected" {% if filters.status == 'rejected' %}selected{% endif %}>✗ נדחה</option>
+                            <option value="synced" {% if filters.status == 'synced' %}selected{% endif %}>↻ סונכרן</option>
+                            <option value="failed" {% if filters.status == 'failed' %}selected{% endif %}>⚠ נכשל</option>
+                        </select>
+                    </div>
+                    
                     <div class="filter-group">
                         <label for="min_score">ציון מינימלי:</label>
                         <input type="number" id="min_score" name="min_score" 
@@ -479,15 +608,31 @@
                     
                     <div class="tags-section">
                         <div class="section-title">
-                            ✨ הצעות חדשות ({{ lecture.suggestion_count }})
+                            <span>✨ הצעות חדשות ({{ lecture.suggestion_count }})</span>
+                            <div class="bulk-actions">
+                                <button onclick="bulkApprove({{ lecture.lecture_id }}, 0.88)" class="btn btn-sm btn-success">
+                                    ✓ אשר כל מעל 88%
+                                </button>
+                                <button onclick="bulkApprove({{ lecture.lecture_id }}, 0.0)" class="btn btn-sm btn-success">
+                                    ✓ אשר הכל
+                                </button>
+                            </div>
                         </div>
                         {% for suggestion in lecture.suggestions %}
-                        <div class="suggestion-item">
+                        <div class="suggestion-item {{ suggestion.status }}">
                             <div class="suggestion-header">
                                 <span class="suggestion-tag">{{ suggestion.tag_name }}</span>
                                 <div class="suggestion-meta">
                                     <span class="score {% if suggestion.score >= 0.8 %}high{% elif suggestion.score >= 0.7 %}medium{% endif %}">
                                         {{ "%.1f"|format(suggestion.score * 100) }}%
+                                    </span>
+                                    <span class="status-badge status-{{ suggestion.status }}">
+                                        {% if suggestion.status == 'pending' %}⏳ ממתין
+                                        {% elif suggestion.status == 'approved' %}✓ מאושר
+                                        {% elif suggestion.status == 'rejected' %}✗ נדחה
+                                        {% elif suggestion.status == 'synced' %}↻ סונכרן
+                                        {% elif suggestion.status == 'failed' %}⚠ נכשל
+                                        {% endif %}
                                     </span>
                                     <span class="model-badge {% if suggestion.is_llm %}model-llm{% else %}model-prototype{% endif %}">
                                         {% if suggestion.is_llm %}🤖 LLM{% else %}📊 Prototype{% endif %}
@@ -495,6 +640,28 @@
                                 </div>
                             </div>
                             <div class="rationale">{{ suggestion.rationale }}</div>
+                            
+                            {% if suggestion.status == 'pending' %}
+                            <div class="suggestion-actions">
+                                <button onclick="approveSuggestion({{ suggestion.suggestion_id }})" class="btn btn-sm btn-success">
+                                    ✓ אשר
+                                </button>
+                                <button onclick="rejectSuggestion({{ suggestion.suggestion_id }})" class="btn btn-sm btn-danger">
+                                    ✗ דחה
+                                </button>
+                            </div>
+                            {% elif suggestion.approved_by %}
+                            <div class="approval-meta">
+                                {% if suggestion.status == 'approved' %}
+                                    ✓ אושר על ידי {{ suggestion.approved_by }} 
+                                {% elif suggestion.status == 'rejected' %}
+                                    ✗ נדחה על ידי {{ suggestion.approved_by }}
+                                {% endif %}
+                                {% if suggestion.approved_at %}
+                                    • {{ suggestion.approved_at.strftime('%d/%m/%Y %H:%M') if suggestion.approved_at is not string else suggestion.approved_at[:16] }}
+                                {% endif %}
+                            </div>
+                            {% endif %}
                         </div>
                         {% endfor %}
                     </div>
@@ -510,6 +677,80 @@
     </div>
     
     <script>
+        function approveSuggestion(suggestionId) {
+            if (!confirm('האם לאשר הצעה זו?')) return;
+            
+            fetch(`/api/approve/${suggestionId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ actor: 'web_user' })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('שגיאה: ' + data.error);
+                } else {
+                    alert('ההצעה אושרה בהצלחה!');
+                    location.reload();
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('שגיאה באישור ההצעה');
+            });
+        }
+        
+        function rejectSuggestion(suggestionId) {
+            if (!confirm('האם לדחות הצעה זו?')) return;
+            
+            fetch(`/api/reject/${suggestionId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ actor: 'web_user' })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('שגיאה: ' + data.error);
+                } else {
+                    alert('ההצעה נדחתה בהצלחה!');
+                    location.reload();
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('שגיאה בדחיית ההצעה');
+            });
+        }
+        
+        function bulkApprove(lectureId, minScore) {
+            const scoreText = minScore > 0 ? `מעל ${minScore * 100}%` : 'כל ההצעות';
+            if (!confirm(`האם לאשר ${scoreText} עבור הרצאה זו?`)) return;
+            
+            fetch('/api/bulk_approve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    lecture_id: lectureId,
+                    min_score: minScore,
+                    actor: 'web_user'
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('שגיאה: ' + data.error);
+                } else {
+                    alert(`אושרו ${data.approved_count} הצעות בהצלחה!`);
+                    location.reload();
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('שגיאה באישור ההצעות');
+            });
+        }
+        
         function rerunBatch() {
             if (!confirm('האם אתה בטוח שברצונך להריץ מחדש את תהליך יצירת ההצעות?\nזה ייקח כמה דקות.')) {
                 return;
