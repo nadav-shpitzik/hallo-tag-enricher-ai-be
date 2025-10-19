@@ -23,14 +23,14 @@ def load_data():
     """Load suggestions, lectures, and tags on startup."""
     global suggestions_df, lectures_cache, tags_map
     
-    csv_path = os.getenv('OUTPUT_CSV_PATH', 'output/tag_suggestions.csv')
+    csv_path = 'output/tag_suggestions.csv'
     if not os.path.exists(csv_path):
         print(f"Error: No suggestions file found at {csv_path}")
         return False
     
     suggestions_df = pd.read_csv(csv_path)
     
-    tags_csv = os.getenv('TAGS_CSV_PATH', 'data/tags.csv')
+    tags_csv = 'data/tags.csv'
     tags_df = pd.read_csv(tags_csv)
     tags_map = dict(zip(tags_df['tag_id'], tags_df['name_he']))
     
