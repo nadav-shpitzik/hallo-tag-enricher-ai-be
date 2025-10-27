@@ -366,18 +366,257 @@ def health():
 
 @app.route('/', methods=['GET'])
 def index():
-    """API info endpoint."""
-    return jsonify({
-        'service': 'Tag Suggestions API',
-        'version': '1.0',
-        'endpoints': {
-            'POST /train': 'Train prototypes from training data',
-            'POST /suggest-tags': 'Get tag suggestions for lectures',
-            'POST /reload-prototypes': 'Reload prototypes from KV store',
-            'GET /health': 'Health check'
-        },
-        'prototypes_loaded': prototypes_loaded
-    }), 200
+    """API documentation homepage with payload examples."""
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Tag Suggestions API</title>
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 20px;
+                background: #f5f5f5;
+                line-height: 1.6;
+            }
+            h1 { color: #333; border-bottom: 3px solid #4CAF50; padding-bottom: 10px; }
+            h2 { color: #555; margin-top: 30px; }
+            .endpoint {
+                background: white;
+                border-radius: 8px;
+                padding: 20px;
+                margin: 20px 0;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            .method {
+                display: inline-block;
+                padding: 4px 12px;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 14px;
+                margin-right: 10px;
+            }
+            .post { background: #4CAF50; color: white; }
+            .get { background: #2196F3; color: white; }
+            .path { font-family: 'Courier New', monospace; font-size: 18px; color: #333; }
+            pre {
+                background: #282c34;
+                color: #abb2bf;
+                padding: 15px;
+                border-radius: 5px;
+                overflow-x: auto;
+                font-size: 13px;
+            }
+            .description { color: #666; margin: 10px 0; }
+            .status {
+                display: inline-block;
+                padding: 8px 16px;
+                border-radius: 20px;
+                font-weight: bold;
+                margin: 10px 0;
+            }
+            .status.loaded { background: #4CAF50; color: white; }
+            .status.not-loaded { background: #f44336; color: white; }
+            code { background: #e8e8e8; padding: 2px 6px; border-radius: 3px; font-family: 'Courier New', monospace; }
+        </style>
+    </head>
+    <body>
+        <h1>🏷️ Tag Suggestions API</h1>
+        <p>AI-powered Hebrew lecture tagging using OpenAI embeddings and prototype learning.</p>
+        <div class="status """ + ("loaded" if prototypes_loaded else "not-loaded") + """">
+            """ + ("✓ Prototypes Loaded: " + str(len(prototype_knn.tag_prototypes)) if prototypes_loaded else "⚠ No Prototypes - Train First") + """
+        </div>
+
+        <h2>📋 API Endpoints</h2>
+
+        <div class="endpoint">
+            <span class="method post">POST</span>
+            <span class="path">/train</span>
+            <p class="description">Train prototypes from training data and save to KV store.</p>
+            
+            <h3>Request Example:</h3>
+            <pre>{
+  "lectures": [
+    {
+      "id": "lec_001",
+      "lecture_title": "שיעור בתלמוד",
+      "lecture_description": "עיון במסכת ברכות",
+      "lecture_tag_ids": ["talmud", "gemara"]
+    },
+    {
+      "id": "lec_002",
+      "lecture_title": "קבלה ומיסטיקה",
+      "lecture_description": "סודות הזוהר",
+      "lecture_tag_ids": ["kabbalah", "zohar"]
+    }
+  ],
+  "tags": {
+    "talmud": {
+      "tag_id": "talmud",
+      "name_he": "תלמוד",
+      "synonyms_he": "גמרא תלמוד בבלי"
+    },
+    "kabbalah": {
+      "tag_id": "kabbalah",
+      "name_he": "קבלה",
+      "synonyms_he": "סודות מיסטיקה זוהר"
+    }
+  }
+}</pre>
+            
+            <h3>Response Example:</h3>
+            <pre>{
+  "status": "success",
+  "num_prototypes": 12,
+  "num_lectures": 5,
+  "num_tags": 12,
+  "low_data_tags": 3
+}</pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method post">POST</span>
+            <span class="path">/suggest-tags</span>
+            <p class="description">Get tag suggestions for new lectures based on pre-trained prototypes.</p>
+            
+            <h3>Request Example:</h3>
+            <pre>{
+  "lectures": [
+    {
+      "id": "test_001",
+      "lecture_title": "שיעור על הלכה",
+      "lecture_description": "דיני שבת והלכות יומיות"
+    },
+    {
+      "id": "test_002",
+      "lecture_title": "פילוסופיה יהודית",
+      "lecture_description": "מחשבת הרמב״ם והרמב״ן"
+    }
+  ],
+  "tags": {
+    "halakha": {
+      "tag_id": "halakha",
+      "name_he": "הלכה",
+      "synonyms_he": "דינים משפט עברי"
+    },
+    "philosophy": {
+      "tag_id": "philosophy",
+      "name_he": "פילוסופיה",
+      "synonyms_he": "מחשבה השקפה"
+    }
+  }
+}</pre>
+            
+            <h3>Response Example:</h3>
+            <pre>{
+  "suggestions": [
+    {
+      "lecture_id": "test_001",
+      "tag_id": "halakha",
+      "tag_name_he": "הלכה",
+      "score": 0.872,
+      "rationale": "Prototype similarity score: 0.872"
+    },
+    {
+      "lecture_id": "test_002",
+      "tag_id": "philosophy",
+      "tag_name_he": "פילוסופיה",
+      "score": 0.815,
+      "rationale": "Prototype similarity score: 0.815"
+    }
+  ],
+  "num_lectures": 2,
+  "num_suggestions": 2
+}</pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method post">POST</span>
+            <span class="path">/reload-prototypes</span>
+            <p class="description">Reload prototypes from KV store without restarting the server.</p>
+            
+            <h3>Request:</h3>
+            <pre>No payload required</pre>
+            
+            <h3>Response Example:</h3>
+            <pre>{
+  "status": "success",
+  "num_prototypes": 12
+}</pre>
+        </div>
+
+        <div class="endpoint">
+            <span class="method get">GET</span>
+            <span class="path">/health</span>
+            <p class="description">Health check endpoint to verify API status.</p>
+            
+            <h3>Response Example:</h3>
+            <pre>{
+  "status": "ok",
+  "prototypes_loaded": true,
+  "num_prototypes": 12
+}</pre>
+        </div>
+
+        <h2>🚀 Quick Start</h2>
+        <div class="endpoint">
+            <h3>1. Train Prototypes (One-time Setup)</h3>
+            <pre>curl -X POST http://localhost:5000/train \\
+  -H "Content-Type: application/json" \\
+  -d @training_data.json</pre>
+
+            <h3>2. Get Tag Suggestions</h3>
+            <pre>curl -X POST http://localhost:5000/suggest-tags \\
+  -H "Content-Type: application/json" \\
+  -d @request_data.json</pre>
+
+            <h3>3. Check Health</h3>
+            <pre>curl http://localhost:5000/health</pre>
+        </div>
+
+        <h2>📊 Data Requirements</h2>
+        <div class="endpoint">
+            <h3>Lecture Object</h3>
+            <ul>
+                <li><code>id</code> (string): Unique lecture identifier</li>
+                <li><code>lecture_title</code> (string): Hebrew lecture title</li>
+                <li><code>lecture_description</code> (string): Hebrew lecture description</li>
+                <li><code>lecture_tag_ids</code> (array, training only): Existing tag IDs for this lecture</li>
+            </ul>
+
+            <h3>Tag Object</h3>
+            <ul>
+                <li><code>tag_id</code> (string): Unique tag identifier</li>
+                <li><code>name_he</code> (string): Hebrew tag name</li>
+                <li><code>synonyms_he</code> (string): Hebrew synonyms (space-separated)</li>
+            </ul>
+        </div>
+
+        <h2>⚙️ Configuration</h2>
+        <div class="endpoint">
+            <p><strong>Environment Variables:</strong></p>
+            <ul>
+                <li><code>OPENAI_API_KEY</code> (required): Your OpenAI API key</li>
+                <li><code>PORT</code> (optional): Server port (default: 5000)</li>
+            </ul>
+            
+            <p><strong>Model Settings:</strong></p>
+            <ul>
+                <li>Embedding Model: <code>text-embedding-3-large</code> (3072 dimensions)</li>
+                <li>Target Precision: 0.90 (high precision for tag suggestions)</li>
+                <li>Min Confidence: 0.60 (threshold for suggestions)</li>
+            </ul>
+        </div>
+
+        <footer style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #666;">
+            <p>Tag Suggestions API v1.0 | Powered by OpenAI & Replit</p>
+        </footer>
+    </body>
+    </html>
+    """
+    return html
 
 
 if __name__ == '__main__':
