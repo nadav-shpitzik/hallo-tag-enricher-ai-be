@@ -4,13 +4,11 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.11"
 dependencies = [
-    "datasetrising>=1.0.4",
     "flask>=3.1.2",
     "numpy>=2.3.4",
     "openai>=2.5.0",
     "pandas>=2.3.3",
-    "psycopg2-binary>=2.9.11",
-    "pyairtable>=3.2.0",
     "python-dotenv>=1.1.1",
+    "replit>=4.1.2",
     "scikit-learn>=1.7.2",
 ]

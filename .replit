@@ -16,30 +16,15 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Run Batch"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Web Viewer"
+args = "API Server"
 
 [[workflows.workflow]]
-name = "Run Batch"
+name = "API Server"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python src/main.py"
-
-[workflows.workflow.metadata]
-outputType = "console"
-
-[[workflows.workflow]]
-name = "Web Viewer"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "python web_viewer.py"
+args = "python api_server.py"
 waitForPort = 5000
 
 [workflows.workflow.metadata]
@@ -50,9 +35,9 @@ localPort = 5000
 externalPort = 80
 
 [[ports]]
-localPort = 42407
-externalPort = 3001
-
-[[ports]]
 localPort = 44347
 externalPort = 3000
+
+[[ports]]
+localPort = 45297
+externalPort = 3001

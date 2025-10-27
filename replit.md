@@ -1,250 +1,273 @@
-# AI Tag Enrichment Batch System
+# Tag Suggestions API
 
 ## Overview
-This project implements a one-off batch system for enriching Hebrew lectures with AI-suggested tags. It uses OpenAI embeddings and prototype learning to suggest tag IDs based on lecture titles and descriptions.
+A stateless REST API for suggesting tags to Hebrew lectures using AI-powered semantic analysis. The system uses OpenAI embeddings and prototype learning to provide intelligent tag suggestions.
 
 ## Project Type
-**Batch Processing System** (not a web application)
-- One-time or on-demand execution
-- Reads from PostgreSQL, outputs to CSV
-- No continuous web server required
+**Stateless REST API**
+- No database dependencies
+- All data provided via API payloads
+- Pre-computed prototypes stored in Replit KV store
+- Fast, scalable tag suggestion endpoint
 
 ## Architecture
 
 ### Core Components
-- **Embeddings**: OpenAI text-embedding-3-large for Hebrew semantic understanding
-- **Prototype Learning**: Per-tag centroids from existing tagged lectures
-- **Threshold Calibration**: Per-tag precision-optimized thresholds
-- **LLM Arbiter**: Optional GPT-4o-mini for borderline case refinement
-- **Output**: CSV and optional PostgreSQL table
+1. **Training Endpoint** (`POST /train`)
+   - Accepts training lectures with existing tags as JSON
+   - Generates embeddings using OpenAI text-embedding-3-large
+   - Computes tag prototypes (centroids) from training data
+   - Calibrates per-tag confidence thresholds
+   - Saves prototypes to Replit KV store
+
+2. **Suggestion Endpoint** (`POST /suggest-tags`)
+   - Accepts new lectures to tag as JSON
+   - Loads pre-computed prototypes from KV store
+   - Generates embeddings for input lectures
+   - Scores against prototypes using cosine similarity
+   - Returns tag suggestions with confidence scores
+
+3. **Reload Endpoint** (`POST /reload-prototypes`)
+   - Reloads prototypes from KV store without restart
+   - Useful after retraining prototypes
 
 ### Data Flow
-1. Load tags from CSV (Hebrew labels + synonyms)
-2. Fetch lectures from PostgreSQL (`enriched_lectures` table)
-3. Generate embeddings for lectures and tags
-4. Build prototypes from existing tagged lectures
-5. Score new lectures against prototypes
-6. Optional LLM refinement for borderline cases
-7. Output suggestions to CSV and/or database
-
-## Recent Changes (2025-10-19)
-
-### Initial Implementation
-- Created modular Python architecture with 9 core modules
-- Implemented embedding generation with OpenAI API batching
-- Built prototype-kNN system with low-data tag handling
-- Added per-tag threshold calibration for high precision
-- Integrated LLM arbiter with Structured Outputs (JSON Schema)
-- Created CSV and database output generators
-- Added QA reporting (coverage, distribution, score stats)
-
-### Web Viewer Added
-- Built Flask-based web viewer for browsing results interactively
-- Features: filterable by score, tag name, model type, previous tags status
-- Hebrew RTL support with responsive design
-- Shows lecture details, previous tags, and new suggestions per lecture
-- **Auto-reload**: Automatically detects CSV file changes and refreshes data on page load
-- Live statistics dashboard (297 lectures, 855 suggestions, 87.8% avg score)
-
-### Shortlist Optimization Added
-- **75% cost reduction** through intelligent candidate shortlisting
-- Multi-signal shortlist reduces from 85 → ~20 tags per lecture
-- Signals: Hebrew keyword matching, embeddings similarity, lecturer history
-- Maintains 100% coverage with dynamic expansion for edge cases
-- Test results: 10 lectures → 30 suggestions with 88.5% avg score
-
-### Phase 2: Approval Workflow & Airtable Sync (Latest)
-- **Database-backed approval workflow** with atomic state machine
-  - Status transitions: pending → approved/rejected → synced/failed
-  - Race-condition-free updates with WHERE clause validation
-  - 409 Conflict responses for concurrent modification attempts
-  - Audit trail: approved_by, approved_at, synced_at timestamps
-- **Web UI for review and approval**
-  - Dual views: lecture-centric and lecturer-centric (deduplicated)
-  - Per-suggestion approve/reject controls with status badges
-  - Bulk approve for entire lectures
-  - Lecturer view shows 217 lecturers with 744 unique tags
-- **Airtable Integration**
-  - pyairtable SDK for accessing מרצים (lecturers) table
-  - Set-union tag updates (preserves existing + adds new)
-  - CLI sync command with dry-run mode
-  - Automatic status tracking (synced/failed with error messages)
-- **Tag hallucination prevention**
-  - LLM validation: only accept tag_ids that exist in tags.csv
-  - Warning logs for hallucinated tags (e.g., "mediatag", typos)
-
-### Files Structure
 ```
-src/
-  ├── config.py          # Configuration from environment
-  ├── database.py        # PostgreSQL connection with approval workflow methods
-  ├── tags_loader.py     # CSV loading and normalization
-  ├── embeddings.py      # OpenAI embeddings generation
-  ├── prototype_knn.py   # Prototype learning and scoring
-  ├── llm_arbiter.py     # LLM refinement with Structured Outputs
-  ├── scorer.py          # Main scoring engine (multi-mode)
-  ├── reasoning_scorer.py # Reasoning mode with Hebrew rationales + validation
-  ├── shortlist.py       # Candidate shortlist optimizer (75% cost reduction)
-  ├── lecturer_search.py # Web search for lecturer profiles
-  ├── airtable_sync.py   # Airtable API client for מרצים table
-  ├── sync_worker.py     # Coordinates database → Airtable sync
-  ├── output.py          # CSV/DB output and QA reports
-  └── main.py            # Orchestration and execution
+Training Flow:
+1. Client sends training lectures + tags via POST /train
+2. API generates embeddings for lectures and tags
+3. API builds prototypes (centroids per tag)
+4. API calibrates thresholds for precision
+5. API saves prototypes to Replit KV store
+6. Returns training summary
 
-data/
-  └── tags.csv           # Tags with Hebrew names and synonyms
-
-db/migrations/
-  └── 001_add_approval_workflow.sql  # Approval workflow schema
-
-output/                  # Generated suggestions (gitignored)
-  ├── tag_suggestions.csv      # Main output (295 suggestions)
-  └── suggestions_report.txt   # Text report for review
-
-web_viewer.py            # Flask web viewer with approval UI
-sync_to_airtable.py      # CLI command for Airtable sync
-view_results.py          # CLI script for text-based viewing
-templates/
-  ├── index.html         # Lecture-centric view
-  └── lecturers.html     # Lecturer-centric view (deduplicated)
+Suggestion Flow:
+1. Client sends lectures + tags via POST /suggest-tags
+2. API loads prototypes from KV store (cached in memory)
+3. API generates embeddings for input lectures
+4. API scores lectures against prototypes
+5. Returns suggestions above threshold with scores
 ```
 
-## User Preferences
-- **Language**: Python 3.11
-- **Code Style**: Type hints, logging, error handling
-- **Security**: Environment variables for all secrets, read-only DB access
-- **Performance**: Batched API calls, efficient embedding generation
+## API Endpoints
+
+### POST /train
+Train prototypes from training data and save to KV store.
+
+**Request:**
+```json
+{
+  "lectures": [
+    {
+      "id": "lec_001",
+      "lecture_title": "שיעור בתלמוד",
+      "lecture_description": "עיון במסכת ברכות",
+      "lecture_tag_ids": ["talmud", "gemara"]
+    }
+  ],
+  "tags": {
+    "talmud": {
+      "tag_id": "talmud",
+      "name_he": "תלמוד",
+      "synonyms_he": "גמרא תלמוד בבלי"
+    }
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "num_prototypes": 12,
+  "num_lectures": 5,
+  "num_tags": 12,
+  "low_data_tags": 3
+}
+```
+
+### POST /suggest-tags
+Get tag suggestions for lectures based on pre-trained prototypes.
+
+**Request:**
+```json
+{
+  "lectures": [
+    {
+      "id": "test_001",
+      "lecture_title": "קבלה ומיסטיקה",
+      "lecture_description": "סודות הזוהר והקבלה"
+    }
+  ],
+  "tags": {
+    "kabbalah": {
+      "tag_id": "kabbalah",
+      "name_he": "קבלה",
+      "synonyms_he": "סודות מיסטיקה"
+    }
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "suggestions": [
+    {
+      "lecture_id": "test_001",
+      "tag_id": "kabbalah",
+      "tag_name_he": "קבלה",
+      "score": 0.865,
+      "rationale": "Prototype similarity score: 0.865"
+    }
+  ],
+  "num_lectures": 1,
+  "num_suggestions": 1
+}
+```
+
+### POST /reload-prototypes
+Reload prototypes from KV store without restarting the server.
+
+**Response:**
+```json
+{
+  "status": "success",
+  "num_prototypes": 12
+}
+```
+
+### GET /health
+Health check endpoint.
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "prototypes_loaded": true,
+  "num_prototypes": 12
+}
+```
+
+### GET /
+API information and available endpoints.
 
 ## How to Use
 
-### First Time Setup
-1. Copy `.env.example` to `.env`
-2. Configure required variables:
-   - `DATABASE_URL` (PostgreSQL connection)
-   - `OPENAI_API_KEY` (your API key)
-   - `TAGS_CSV_PATH` (path to tags CSV)
-   - `OUTPUT_CSV_PATH` (where to save results)
-3. Prepare your tags CSV with format: `tag_id,name_he,synonyms_he`
-4. Run validation: `python validate_setup.py`
-
-### Running the Batch
+### 1. Initial Setup
+Set the `OPENAI_API_KEY` environment variable (required for embeddings):
 ```bash
-python src/main.py
+export OPENAI_API_KEY=your-api-key-here
+```
+
+### 2. Start the API Server
+The API server runs automatically via the "API Server" workflow on port 5000.
+
+### 3. Train Prototypes
+Send your training data (lectures with existing tags) to train the model:
+
+```bash
+curl -X POST http://localhost:5000/train \
+  -H "Content-Type: application/json" \
+  -d @training_data.json
+```
+
+Training happens once or periodically when you have new training data. The prototypes are saved to Replit KV store and persist across server restarts.
+
+### 4. Get Tag Suggestions
+Send new lectures to get tag suggestions:
+
+```bash
+curl -X POST http://localhost:5000/suggest-tags \
+  -H "Content-Type: application/json" \
+  -d @request_data.json
+```
+
+## Testing
+
+Run the test script to verify the complete flow:
+
+```bash
+python test_api.py
 ```
 
 This will:
-- Generate embeddings for all lectures and tags
-- Build prototypes from existing tagged lectures
-- Score and suggest tags for all lectures
-- Save results to CSV (and optionally database)
-- Generate QA report
+1. Check API health
+2. Train prototypes with sample data
+3. Get tag suggestions for test lectures
+4. Test the reload endpoint
 
-### Viewing Results
+## Configuration
 
-**Web Viewer (Interactive):**
-- Run the "Web Viewer" workflow from Replit UI
-- Browse suggestions with filters (score, tags, model type)
-- Hebrew-friendly interface with per-lecture details
+### Environment Variables
+- `OPENAI_API_KEY` (required): Your OpenAI API key for embeddings
+- `PORT` (optional): API server port (default: 5000)
 
-**CLI Viewer:**
-```bash
-python view_results.py
+### Model Settings
+Configured in `src/config.py`:
+- **Embedding Model**: `text-embedding-3-large` (3072 dimensions)
+- **Target Precision**: 0.90 (high precision for tag suggestions)
+- **Min Confidence**: 0.60 (threshold for suggestions)
+- **Prototype Weight**: 0.8 (vs label weight 0.2 for low-data tags)
+
+## Files Structure
+
 ```
-Generates text report with all lecture details and suggestions
+api_server.py           # Main API server with all endpoints
+train_prototypes.py     # Standalone training script (CLI/API mode)
+test_api.py             # Test script for API validation
 
-**Direct CSV:**
-- `output/tag_suggestions.csv` - Machine-readable results
-- `output/suggestions_report.txt` - Human-readable text report
-
-### Configuration Options
-- `TEST_MODE=true|false` - Enable test mode with limited lectures (default: false)
-- `TEST_MODE_LIMIT=30` - Number of lectures to process in test mode (default: 30)
-- `USE_LLM=true|false` - Enable/disable LLM arbiter (default: true)
-- `WRITE_TO_DB=true|false` - Write to database table (default: false)
-- See `src/config.py` for all tunable parameters
-
-## Cost Estimates (With Shortlist Optimization)
-
-### Reasoning Mode (Current)
-- For 300 untagged lectures: ~$0.29
-- Cost reduction: 75% vs full-list approach
-- Quality maintained: 85-95% confidence scores
-
-### Token Usage
-- Without shortlist: ~7.65M tokens ($1.15) for 300 lectures
-- With shortlist: ~1.95M tokens ($0.29) for 300 lectures
-- Savings: ~5.7M tokens ($0.86)
-
-## Phase 2: Approval & Airtable Sync Workflow
-
-### 1. Review Suggestions
-**Lecturer-Centric View** (Recommended):
-- Navigate to `/lecturers` in the web viewer
-- See 217 lecturers with 744 unique tags (deduplicated)
-- Each tag shows which lectures contributed to the suggestion
-
-**Lecture-Centric View**:
-- Navigate to `/` in the web viewer
-- See 297 lectures with 858 individual suggestions
-
-### 2. Approve Tags
-- Click "Approve" on individual suggestions
-- Use "Bulk Approve" to approve all suggestions for a lecture
-- Status changes: `pending` → `approved`
-
-### 3. Sync to Airtable
-
-**Prerequisites**:
-- Add secrets via Replit Secrets UI:
-  - `AIRTABLE_API_KEY`: Your personal access token from https://airtable.com/create/tokens
-  - `AIRTABLE_BASE_ID`: Your base ID (starts with "app...")
-
-**Test Connection**:
-```bash
-python sync_to_airtable.py --test-connection
+src/
+  ├── config.py         # Configuration (no database dependencies)
+  ├── embeddings.py     # OpenAI embeddings generation
+  ├── prototype_knn.py  # Prototype learning and scoring
+  ├── scorer.py         # Multi-mode scoring engine
+  ├── reasoning_scorer.py # LLM-based reasoning scorer
+  ├── llm_arbiter.py    # LLM refinement logic
+  └── shortlist.py      # Candidate shortlist optimizer
 ```
 
-**Dry Run** (see what would be synced):
-```bash
-python sync_to_airtable.py --dry-run
-```
+## Recent Changes (2025-10-27)
 
-**Actual Sync**:
-```bash
-python sync_to_airtable.py
-```
+### API Transformation
+- **Removed all database dependencies** (PostgreSQL, psycopg2)
+- **Stateless design**: All data via API payloads
+- **Replit KV Store**: Prototypes stored in key-value store
+- **Combined endpoints**: Training and suggestions in one API
+- **Removed components**: Web viewer, Airtable sync, batch processing
+- **Kept core AI logic**: Embeddings, prototypes, scoring, LLM arbiter
 
-This will:
-- Group approved suggestions by lecturer
-- Fetch current tags from Airtable מרצים table
-- Add only new tags (preserves existing ones via set-union)
-- Update `status` to `synced` or `failed`
-- Log detailed results
-
-**Features**:
-- ✓ Automatic retry with exponential backoff (3 attempts)
-- ✓ Set-union: never removes existing lecturer tags
-- ✓ Deduplication: one tag per lecturer (not per lecture)
-- ✓ Error tracking: failed syncs logged with reason
+### Benefits
+- ✓ **Portable**: No database setup required
+- ✓ **Stateless**: Each request is independent
+- ✓ **Fast**: Pre-computed prototypes loaded in memory
+- ✓ **Scalable**: Train once, serve many
+- ✓ **Simple**: Single API server, clear endpoints
 
 ## Dependencies
-- openai (embeddings + LLM)
-- psycopg2-binary (PostgreSQL)
-- pandas (data processing)
-- numpy (vector operations)
-- scikit-learn (similarity computations)
-- python-dotenv (environment config)
-- flask (web viewer)
-- pyairtable (Airtable API client)
+- `openai` - Embeddings and LLM
+- `flask` - REST API framework
+- `numpy` - Vector operations
+- `scikit-learn` - Similarity computations
+- `pandas` - Data processing
+- `python-dotenv` - Environment config
+- `replit` - KV store integration
+
+## Cost Estimates
+
+### Training (one-time or periodic)
+- For 100 training lectures: ~$0.02 in embeddings
+- For 50 tags: ~$0.001 in embeddings
+- **Total**: ~$0.02 per training run
+
+### Suggestions (per request)
+- For 10 lectures: ~$0.002 in embeddings
+- **Total**: ~$0.0002 per lecture
+
+Training is infrequent (only when you have new training data), while suggestions are fast and cheap.
 
 ## Security Notes
-- Uses read-only database user (recommended)
-- All secrets via environment variables
-- No secrets logged or committed to git
-- `.env` file excluded in `.gitignore`
-
-## Known Limitations
-- Requires existing tagged lectures to build prototypes (at least 1 per tag)
-- Hebrew-specific (embeddings model supports multilingual but system designed for Hebrew)
-- One-off batch (not incremental by default)
-- Airtable sync requires manual approval step (by design for quality control)
+- API key stored in environment variable
+- No data persistence (except prototypes in KV store)
+- No authentication (add as needed for production)
+- CORS disabled (enable if needed for web clients)
