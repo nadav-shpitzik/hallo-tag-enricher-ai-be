@@ -38,6 +38,20 @@ class Config:
         self.llm_borderline_lower = 0.50
         self.llm_borderline_upper = 0.80
         
+        # Category-aware thresholds (v2)
+        self.category_thresholds = {
+            'Topic': 0.65,
+            'Persona': 0.60,
+            'Tone': 0.55,
+            'Format': 0.50,
+            'Audience': 0.60,
+            'default': 0.60
+        }
+        
+        # Related lectures boost settings
+        self.related_lecture_boost = 0.10
+        self.related_lecture_min_overlap = 1
+        
         # Tag selection settings
         self.top_k_tags = 7
         self.min_k_tags = 3

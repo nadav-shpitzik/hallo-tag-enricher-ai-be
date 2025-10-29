@@ -172,7 +172,12 @@ def train_from_data(training_data: dict) -> dict:
 
 def score_lecture_v2(lecture: Dict, labels: List[Dict]) -> List[Dict]:
     """
-    Score a single lecture against prototypes (v2 format).
+    Score a single lecture against prototypes (v2 format) with category-aware logic.
+    
+    Enhancements:
+    - Category-specific confidence thresholds
+    - Related lectures co-occurrence boost
+    - Intelligent reasons generation
     
     Args:
         lecture: Lecture dict with id, title, description, lecturer info, etc.
@@ -205,31 +210,61 @@ def score_lecture_v2(lecture: Dict, labels: List[Dict]) -> List[Dict]:
     
     lecture_embedding = lecture_embeddings[lecture_id]
     
-    # Get scores from prototype KNN
+    # Get base scores from prototype KNN
     scores = prototype_knn.score_lecture(lecture_embedding, tag_embeddings_cache)
     
     # Create label lookup by id
     labels_by_id = {label['id']: label for label in labels if label.get('active', True)}
     
-    # Convert to suggestions format
+    # Extract related lectures labels for co-occurrence analysis
+    related_labels = set()
+    related_lectures = lecture.get('related_lectures', [])
+    for related in related_lectures:
+        related_labels.update(related.get('labels', []))
+    
+    # Prepare lecture text for keyword analysis
+    title = lecture.get('title', '').lower()
+    description = lecture.get('description', '').lower()
+    
+    # Convert to suggestions format with enhancements
     suggestions = []
-    for label_id, score in scores.items():
-        if label_id in labels_by_id:
-            label = labels_by_id[label_id]
+    for label_id, base_score in scores.items():
+        if label_id not in labels_by_id:
+            continue
             
-            # Determine reasons based on score
-            reasons = []
-            if score >= 0.8:
-                reasons.append("desc_match")
-            elif score >= 0.6:
-                reasons.append("title_match")
-            else:
-                reasons.append("cooccur")
-            
+        label = labels_by_id[label_id]
+        category = label.get('category', 'Unknown')
+        label_name = label.get('name_he', '').lower()
+        
+        # Apply category-specific threshold
+        category_threshold = config.category_thresholds.get(category, config.category_thresholds['default'])
+        
+        # Calculate confidence with related lectures boost
+        confidence = base_score
+        reasons = []
+        
+        # Check for related lectures co-occurrence
+        if label_id in related_labels:
+            confidence += config.related_lecture_boost
+            reasons.append("related_cooccur")
+        
+        # Analyze score strength for keyword matching signals
+        if base_score >= 0.80:
+            reasons.append("desc_match")
+        elif base_score >= 0.65:
+            reasons.append("title_match")
+        elif base_score >= 0.50:
+            reasons.append("cooccur")
+        else:
+            # Low score - might be a default category prior
+            reasons.append(f"default_{category.lower()}_prior")
+        
+        # Only include if confidence meets category threshold
+        if confidence >= category_threshold:
             suggestion = {
                 'label_id': label_id,
-                'category': label.get('category', 'Unknown'),
-                'confidence': float(score),
+                'category': category,
+                'confidence': min(float(confidence), 1.0),  # Cap at 1.0
                 'reasons': reasons
             }
             suggestions.append(suggestion)
