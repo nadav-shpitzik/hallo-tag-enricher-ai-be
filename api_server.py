@@ -99,6 +99,68 @@ def serialize_prototypes(prototype_knn_inst: PrototypeKNN, tag_embeddings: Dict[
     }
 
 
+def validate_training_data(lectures: List[Dict], tags_data: Dict) -> Dict[str, any]:
+    """
+    Validate training data for category diversity and data quality.
+    
+    Returns warnings and statistics about the training data.
+    """
+    warnings = []
+    stats = {
+        'total_lectures': len(lectures),
+        'total_tags': len(tags_data),
+        'categories': {},
+        'low_data_tags': []
+    }
+    
+    # Analyze category distribution
+    category_counts = {}
+    tag_example_counts = {}
+    
+    for tag_id, tag_info in tags_data.items():
+        category = tag_info.get('category', 'Unknown')
+        category_counts[category] = category_counts.get(category, 0) + 1
+        tag_example_counts[tag_id] = 0
+    
+    # Count examples per tag
+    for lecture in lectures:
+        for tag_id in lecture.get('lecture_tag_ids', []) + lecture.get('label_ids', []):
+            if tag_id in tag_example_counts:
+                tag_example_counts[tag_id] += 1
+    
+    # Check for low-data tags
+    for tag_id, count in tag_example_counts.items():
+        if count < 5:
+            tag_info = tags_data.get(tag_id, {})
+            stats['low_data_tags'].append({
+                'tag_id': tag_id,
+                'category': tag_info.get('category', 'Unknown'),
+                'examples': count
+            })
+    
+    # Store category stats
+    for category, count in category_counts.items():
+        stats['categories'][category] = {
+            'num_tags': count,
+            'avg_examples': sum(tag_example_counts[tid] for tid, tinfo in tags_data.items() if tinfo.get('category') == category) / count if count > 0 else 0
+        }
+    
+    # Generate warnings
+    if not category_counts:
+        warnings.append("No categories found in tags (consider adding 'category' field)")
+    elif len(category_counts) < 2:
+        warnings.append(f"Only {len(category_counts)} category found. Consider diversifying across Topic, Persona, Tone, Format, Audience")
+    
+    if len(stats['low_data_tags']) > len(tags_data) * 0.5:
+        warnings.append(f"{len(stats['low_data_tags'])} tags have <5 examples (>{len(tags_data)//2} tags). Model may struggle with these.")
+    
+    if len(lectures) < 20:
+        warnings.append(f"Only {len(lectures)} training lectures. Recommend at least 20-50 for reliable prototypes.")
+    
+    stats['warnings'] = warnings
+    return stats
+
+
 def train_from_data(training_data: dict) -> dict:
     """
     Train prototypes from training data and save to KV store.
@@ -119,6 +181,11 @@ def train_from_data(training_data: dict) -> dict:
         raise ValueError("No tags provided in training data")
     
     logger.info(f"Training on {len(lectures)} lectures with {len(tags_data)} tags")
+    
+    # Validate training data quality
+    validation_stats = validate_training_data(lectures, tags_data)
+    for warning in validation_stats['warnings']:
+        logger.warning(f"Training validation: {warning}")
     
     # Initialize config
     train_config = Config()
@@ -160,13 +227,18 @@ def train_from_data(training_data: dict) -> dict:
     db["prototypes"] = json.dumps(prototypes_data)
     logger.info("Saved prototypes to Replit KV store")
     
-    # Return summary
+    # Return summary with validation stats
     return {
         'status': 'success',
         'num_prototypes': len(train_prototype_knn.tag_prototypes),
         'num_lectures': len(lectures),
         'num_tags': len(tags_data),
-        'low_data_tags': sum(1 for s in train_prototype_knn.tag_stats.values() if s.get('is_low_data', False))
+        'low_data_tags': sum(1 for s in train_prototype_knn.tag_stats.values() if s.get('is_low_data', False)),
+        'validation': {
+            'warnings': validation_stats['warnings'],
+            'categories': validation_stats['categories'],
+            'num_low_data_tags': len(validation_stats['low_data_tags'])
+        }
     }
 
 
