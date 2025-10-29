@@ -12,7 +12,10 @@ class Config:
         
         # Feature flags
         self.use_llm = kwargs.get('use_llm', os.getenv("USE_LLM", "true").lower() == "true")
-        self.scoring_mode = kwargs.get('scoring_mode', os.getenv("SCORING_MODE", "reasoning"))
+        
+        # Scoring mode: "full_quality" (prototype + arbiter), "reasoning" (pure LLM), "fast" (prototype only)
+        self.scoring_mode = kwargs.get('scoring_mode', os.getenv("SCORING_MODE", "full_quality"))
+        
         self.use_shortlist = kwargs.get('use_shortlist', os.getenv("USE_SHORTLIST", "true").lower() == "true")
         self.shortlist_fallback = kwargs.get('shortlist_fallback', os.getenv("SHORTLIST_FALLBACK", "true").lower() == "true")
         self.test_mode = kwargs.get('test_mode', os.getenv("TEST_MODE", "false").lower() == "true")

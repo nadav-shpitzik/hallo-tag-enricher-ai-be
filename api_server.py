@@ -20,6 +20,8 @@ from replit import db
 from src.embeddings import EmbeddingsGenerator
 from src.prototype_knn import PrototypeKNN
 from src.config import Config
+from src.llm_arbiter import LLMArbiter
+from src.reasoning_scorer import ReasoningScorer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -243,9 +245,9 @@ def train_from_data(training_data: dict) -> dict:
     }
 
 
-def score_lecture_v2(lecture: Dict, labels: List[Dict]) -> List[Dict]:
+def score_lecture_fast(lecture: Dict, labels: List[Dict]) -> List[Dict]:
     """
-    Score a single lecture against prototypes (v2 format) with category-aware logic.
+    Fast scoring mode: Prototype similarity only with category-aware thresholds.
     
     Enhancements:
     - Category-specific confidence thresholds
@@ -348,6 +350,183 @@ def score_lecture_v2(lecture: Dict, labels: List[Dict]) -> List[Dict]:
     return suggestions
 
 
+def score_lecture_with_arbiter(lecture: Dict, labels: List[Dict]) -> List[Dict]:
+    """
+    Full quality mode: Prototype scoring + LLM arbiter for borderline cases.
+    
+    Flow:
+    1. Get prototype scores for all labels
+    2. Auto-approve high confidence (>= 0.80)
+    3. Send borderline (0.60-0.80) to LLM arbiter for review
+    4. Reject low confidence (< 0.60)
+    
+    Args:
+        lecture: Lecture dict with id, title, description, etc.
+        labels: List of label dicts
+    
+    Returns:
+        List of high-quality suggestions
+    """
+    if not prototypes_loaded:
+        raise RuntimeError("Prototypes not loaded. Please train first or reload prototypes.")
+    
+    # Get fast prototype scores first
+    fast_suggestions = score_lecture_fast(lecture, labels)
+    
+    if not fast_suggestions:
+        return []
+    
+    # Create labels lookup
+    labels_by_id = {label['id']: label for label in labels}
+    
+    # Split into high, borderline, and low confidence
+    high_confidence = []
+    borderline = []
+    
+    for sugg in fast_suggestions:
+        conf = sugg['confidence']
+        if conf >= config.high_confidence_threshold:
+            high_confidence.append(sugg)
+        elif conf >= config.llm_borderline_lower:
+            borderline.append(sugg)
+        # Else: below borderline_lower, reject
+    
+    # If no borderline cases, return high confidence only
+    if not borderline:
+        logger.info(f"No borderline suggestions, returning {len(high_confidence)} high confidence")
+        return high_confidence
+    
+    # Use LLM arbiter to refine borderline suggestions
+    logger.info(f"LLM arbiter reviewing {len(borderline)} borderline suggestions")
+    
+    arbiter = LLMArbiter(api_key=config.openai_api_key, config=config)
+    
+    # Convert borderline to format expected by arbiter
+    borderline_scores = {sugg['label_id']: sugg['confidence'] for sugg in borderline}
+    candidate_tags = {label_id: labels_by_id[label_id] for label_id in borderline_scores.keys()}
+    
+    # Call arbiter
+    approved_ids = arbiter.refine_suggestions(
+        lecture_title=lecture.get('title', ''),
+        lecture_description=lecture.get('description', ''),
+        candidate_tags=candidate_tags,
+        scores=borderline_scores
+    )
+    
+    # Add approved borderline suggestions
+    arbiter_approved = [
+        sugg for sugg in borderline 
+        if sugg['label_id'] in approved_ids
+    ]
+    
+    # Add "llm_refined" to reasons for arbiter-approved suggestions
+    for sugg in arbiter_approved:
+        if 'reasons' not in sugg:
+            sugg['reasons'] = []
+        sugg['reasons'].append('llm_refined')
+    
+    logger.info(f"LLM arbiter approved {len(arbiter_approved)} of {len(borderline)} borderline")
+    
+    # Combine and sort
+    final_suggestions = high_confidence + arbiter_approved
+    final_suggestions.sort(key=lambda x: x['confidence'], reverse=True)
+    
+    return final_suggestions
+
+
+def score_lecture_with_reasoning(lecture: Dict, labels: List[Dict]) -> List[Dict]:
+    """
+    Reasoning mode: Pure LLM-based scoring using GPT-4o-mini.
+    
+    Uses structured output to generate intelligent suggestions with Hebrew rationales.
+    Highest quality but slowest and most expensive.
+    
+    Args:
+        lecture: Lecture dict
+        labels: List of label dicts
+    
+    Returns:
+        List of LLM-generated suggestions
+    """
+    scorer = ReasoningScorer(
+        model=config.llm_model,
+        min_confidence=config.min_confidence_threshold
+    )
+    
+    # Convert lecture to format expected by reasoning scorer
+    lecture_for_scorer = {
+        'id': lecture.get('id'),
+        'lecture_title': lecture.get('title', ''),
+        'lecture_description': lecture.get('description', ''),
+        'lecturer_name': lecture.get('lecturer_name', '')
+    }
+    
+    # Convert labels to format expected by scorer
+    labels_for_scorer = []
+    for label in labels:
+        if not label.get('active', True):
+            continue
+        labels_for_scorer.append({
+            'tag_id': label['id'],
+            'name_he': label.get('name_he', ''),
+            'synonyms_he': label.get('synonyms_he', ''),
+            'category': label.get('category', 'Unknown')
+        })
+    
+    # Call reasoning scorer
+    llm_suggestions = scorer.score_lecture(
+        lecture=lecture_for_scorer,
+        all_tags=labels_for_scorer
+    )
+    
+    # Convert to v2 format
+    v2_suggestions = []
+    for llm_sugg in llm_suggestions:
+        # Find the label to get category
+        label = next((l for l in labels if l['id'] == llm_sugg['tag_id']), None)
+        if not label:
+            continue
+        
+        v2_suggestions.append({
+            'label_id': llm_sugg['tag_id'],
+            'category': label.get('category', 'Unknown'),
+            'confidence': llm_sugg['score'],
+            'reasons': ['llm_reasoning'],
+            'rationale_he': llm_sugg.get('rationale', '')
+        })
+    
+    return v2_suggestions
+
+
+def score_lecture_v2(lecture: Dict, labels: List[Dict], scoring_mode: str = None) -> List[Dict]:
+    """
+    Router function for scoring modes.
+    
+    Modes:
+    - "fast": Prototype similarity only (fastest, cheapest)
+    - "full_quality": Prototype + LLM arbiter (balanced, recommended)
+    - "reasoning": Pure LLM reasoning (highest quality, most expensive)
+    
+    Args:
+        lecture: Lecture dict
+        labels: List of label dicts
+        scoring_mode: Override config scoring mode
+    
+    Returns:
+        List of suggestions
+    """
+    mode = scoring_mode or config.scoring_mode
+    
+    logger.info(f"Scoring lecture {lecture.get('id')} with mode: {mode}")
+    
+    if mode == "reasoning":
+        return score_lecture_with_reasoning(lecture, labels)
+    elif mode == "full_quality":
+        return score_lecture_with_arbiter(lecture, labels)
+    else:  # "fast" or default
+        return score_lecture_fast(lecture, labels)
+
+
 @app.route('/suggest-tags', methods=['POST'])
 def suggest_tags():
     """
@@ -358,6 +537,7 @@ def suggest_tags():
         "request_id": "uuid",
         "model_version": "v1",
         "artifact_version": "labels-emb-2025-10-29",
+        "scoring_mode": "full_quality" (optional: "fast", "full_quality", "reasoning"),
         "lecture": {
             "id": "rec123",
             "title": "...",
@@ -402,6 +582,7 @@ def suggest_tags():
         request_id = data.get('request_id')
         model_version = data.get('model_version', 'v1')
         artifact_version = data.get('artifact_version', 'unknown')
+        scoring_mode = data.get('scoring_mode')  # Optional override
         lecture = data.get('lecture')
         labels = data.get('labels', [])
         
@@ -411,8 +592,8 @@ def suggest_tags():
         if not labels:
             return jsonify({'error': 'No labels provided'}), 400
         
-        # Score lecture
-        suggestions = score_lecture_v2(lecture, labels)
+        # Score lecture with optional mode override
+        suggestions = score_lecture_v2(lecture, labels, scoring_mode=scoring_mode)
         
         response = {
             'request_id': request_id,
@@ -674,11 +855,21 @@ def index():
             <span class="path">/suggest-tags</span>
             <p class="description">Get tag suggestions for a single lecture based on pre-trained prototypes.</p>
             
+            <h3>⚙️ Scoring Modes</h3>
+            <p>Choose the right balance of quality, speed, and cost:</p>
+            <ul>
+                <li><strong>"fast"</strong>: Prototype similarity only (~1s, cheapest) - Good baseline quality</li>
+                <li><strong>"full_quality"</strong>: Prototype + LLM arbiter (~2-3s, balanced) - ✓ Recommended default</li>
+                <li><strong>"reasoning"</strong>: Pure LLM analysis (~5-7s, expensive) - Highest quality with Hebrew rationales</li>
+            </ul>
+            <p>Add <code>"scoring_mode": "full_quality"</code> to your request to override the default.</p>
+            
             <h3>Request Example (v2):</h3>
             <pre>{
   "request_id": "c5f6f5f2-6c36-4b6f-9d6f-1d0b02b24a11",
   "model_version": "v1",
   "artifact_version": "labels-emb-2025-10-29",
+  "scoring_mode": "full_quality",
   "lecture": {
     "id": "rec17SffStTL231k8",
     "title": "על חרדה והתמודדות",
@@ -801,19 +992,60 @@ def index():
             </ul>
         </div>
 
+        <h2>⚙️ Scoring Modes Comparison</h2>
+        <div class="endpoint">
+            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                <tr style="background: #f0f0f0; border-bottom: 2px solid #ddd;">
+                    <th style="padding: 10px; text-align: left;">Mode</th>
+                    <th style="padding: 10px; text-align: left;">How It Works</th>
+                    <th style="padding: 10px; text-align: left;">Speed</th>
+                    <th style="padding: 10px; text-align: left;">Cost/Lecture</th>
+                    <th style="padding: 10px; text-align: left;">Best For</th>
+                </tr>
+                <tr style="border-bottom: 1px solid #eee;">
+                    <td style="padding: 10px;"><strong>fast</strong></td>
+                    <td style="padding: 10px;">Vector similarity against prototypes</td>
+                    <td style="padding: 10px;">~1s</td>
+                    <td style="padding: 10px;">$0.0002</td>
+                    <td style="padding: 10px;">Quick baseline, batch processing</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #eee; background: #f9fff9;">
+                    <td style="padding: 10px;"><strong>full_quality</strong> ✓</td>
+                    <td style="padding: 10px;">Prototypes + LLM reviews borderline cases</td>
+                    <td style="padding: 10px;">~2-3s</td>
+                    <td style="padding: 10px;">$0.001-0.003</td>
+                    <td style="padding: 10px;"><strong>Recommended default - best balance</strong></td>
+                </tr>
+                <tr style="border-bottom: 1px solid #eee;">
+                    <td style="padding: 10px;"><strong>reasoning</strong></td>
+                    <td style="padding: 10px;">GPT-4o-mini reads and analyzes lecture</td>
+                    <td style="padding: 10px;">~5-7s</td>
+                    <td style="padding: 10px;">$0.004-0.008</td>
+                    <td style="padding: 10px;">Maximum quality, Hebrew explanations</td>
+                </tr>
+            </table>
+            <p style="color: #666; font-size: 14px;">
+                💡 <strong>Tip:</strong> Start with <code>full_quality</code> for the best balance. 
+                Use <code>reasoning</code> when you need the absolute highest accuracy or want detailed Hebrew rationales.
+                Use <code>fast</code> only for large-scale batch processing where speed matters most.
+            </p>
+        </div>
+
         <h2>⚙️ Configuration</h2>
         <div class="endpoint">
             <p><strong>Environment Variables:</strong></p>
             <ul>
                 <li><code>OPENAI_API_KEY</code> (required): Your OpenAI API key</li>
                 <li><code>PORT</code> (optional): Server port (default: 5000)</li>
+                <li><code>SCORING_MODE</code> (optional): Default scoring mode ("fast", "full_quality", "reasoning"). Default: "full_quality"</li>
             </ul>
             
             <p><strong>Model Settings:</strong></p>
             <ul>
                 <li>Embedding Model: <code>text-embedding-3-large</code> (3072 dimensions)</li>
+                <li>LLM Model: <code>gpt-4o-mini</code> (for arbiter & reasoning modes)</li>
                 <li>Target Precision: 0.90 (high precision for tag suggestions)</li>
-                <li>Min Confidence: 0.60 (threshold for suggestions)</li>
+                <li>Category-Aware Thresholds: Topic (0.65), Persona (0.60), Tone (0.55), Format (0.50), Audience (0.60)</li>
             </ul>
         </div>
 

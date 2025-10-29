@@ -45,9 +45,44 @@ Suggestion Flow:
 1. Client sends lectures + tags via POST /suggest-tags
 2. API loads prototypes from KV store (cached in memory)
 3. API generates embeddings for input lectures
-4. API scores lectures against prototypes
+4. API scores lectures using selected scoring mode:
+   - FAST: Prototype similarity only (~1s)
+   - FULL_QUALITY: Prototype + LLM arbiter for borderline (~2-3s) ✓ Recommended
+   - REASONING: Pure LLM analysis with Hebrew rationales (~5-7s)
 5. Returns suggestions above threshold with scores
 ```
+
+### Scoring Modes
+
+The API supports three scoring modes that balance quality, speed, and cost:
+
+**1. Fast Mode (`"fast"`)**
+- Uses only prototype similarity matching
+- Fastest option (~1 second per lecture)
+- Cheapest (~$0.0002 per lecture)
+- Good baseline quality
+- Best for: Batch processing, quick previews
+
+**2. Full Quality Mode (`"full_quality"`)** ✓ **Recommended Default**
+- Prototype scoring + LLM arbiter for borderline cases
+- Balanced speed (~2-3 seconds per lecture)
+- Moderate cost (~$0.001-0.003 per lecture)
+- LLM reviews uncertain suggestions (0.50-0.80 confidence)
+- Auto-approves high confidence (≥0.80)
+- Adds "llm_refined" reason to arbiter-approved suggestions
+- Best for: Production use, general tagging
+
+**3. Reasoning Mode (`"reasoning"`)**
+- Pure GPT-4o-mini analysis of lecture content
+- Highest quality but slowest (~5-7 seconds per lecture)
+- Most expensive (~$0.004-0.008 per lecture)
+- Generates detailed Hebrew rationales for each suggestion
+- Confidence scores typically 0.85+
+- Adds "rationale_he" field with explanations
+- Best for: Critical accuracy needs, when explanations are valuable
+
+**How to Use:**
+Add `"scoring_mode": "full_quality"` to your /suggest-tags request, or set the `SCORING_MODE` environment variable to change the default.
 
 ## API Endpoints
 
