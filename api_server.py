@@ -25,6 +25,7 @@ from src.reasoning_scorer import ReasoningScorer
 from src.lecturer_search import LecturerSearchService
 from src.csv_parser import parse_csv_training_data
 from src.prototype_storage import PrototypeStorage
+from src.ensemble_scorer import EnsembleScorer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -506,14 +507,135 @@ def score_lecture_with_reasoning(lecture: Dict, labels: List[Dict]) -> List[Dict
     return v2_suggestions
 
 
+def score_lecture_with_ensemble(lecture: Dict, labels: List[Dict]) -> List[Dict]:
+    """
+    Ensemble mode: Combines reasoning and prototype scores for best accuracy.
+    
+    When both models agree, applies a bonus for higher confidence.
+    Default weights: 80% reasoning, 20% prototype, +15% agreement bonus.
+    
+    Args:
+        lecture: Lecture dict
+        labels: List of label dicts
+    
+    Returns:
+        List of ensemble suggestions
+    """
+    if not prototypes_loaded:
+        raise RuntimeError("Prototypes not loaded. Please train first or reload prototypes.")
+    
+    # Generate embedding for prototype scoring
+    lecture_for_embedding = {
+        'id': lecture.get('id'),
+        'lecture_title': lecture.get('title', ''),
+        'lecture_description': lecture.get('description', '')
+    }
+    
+    embeddings_gen = EmbeddingsGenerator(
+        api_key=config.openai_api_key,
+        model=config.embedding_model
+    )
+    lecture_embeddings = embeddings_gen.generate_lecture_embeddings([lecture_for_embedding])
+    lecture_embedding = lecture_embeddings[lecture.get('id')]
+    
+    # Fetch lecturer bio if available
+    lecturer_profile = None
+    lecturer_id = lecture.get('lecturer_id')
+    lecturer_name = lecture.get('lecturer_name')
+    lecture_description = lecture.get('description', '')
+    
+    if lecturer_id or lecturer_name:
+        try:
+            search_service = LecturerSearchService(api_key=config.openai_api_key)
+            lecturer_profile = search_service.get_lecturer_profile(
+                lecturer_id=lecturer_id,
+                lecturer_name=lecturer_name,
+                lecture_description=lecture_description
+            )
+            if lecturer_profile:
+                logger.info(f"Enriching ensemble with lecturer bio: {lecturer_name or lecturer_id}")
+        except Exception as e:
+            logger.warning(f"Failed to fetch lecturer bio: {e}")
+    
+    # Prepare data for scorers
+    lecture_for_scorer = {
+        'id': lecture.get('id'),
+        'lecture_title': lecture.get('title', ''),
+        'lecture_description': lecture.get('description', ''),
+        'lecturer_name': lecturer_name or ''
+    }
+    
+    labels_for_scorer = []
+    tags_data = {}
+    for label in labels:
+        if not label.get('active', True):
+            continue
+        labels_for_scorer.append({
+            'tag_id': label['id'],
+            'name_he': label.get('name_he', ''),
+            'synonyms_he': label.get('synonyms_he', ''),
+            'category': label.get('category', 'Unknown')
+        })
+        tags_data[label['id']] = {
+            'tag_id': label['id'],
+            'name_he': label.get('name_he', ''),
+            'category': label.get('category', 'Unknown')
+        }
+    
+    # Initialize ensemble scorer
+    reasoning_scorer = ReasoningScorer(
+        model=config.llm_model,
+        min_confidence=config.min_confidence_threshold,
+        confidence_scale=config.reasoning_confidence_scale
+    )
+    
+    ensemble_scorer = EnsembleScorer(
+        reasoning_scorer=reasoning_scorer,
+        prototype_knn=prototype_knn,
+        tags_data=tags_data,
+        config=config
+    )
+    
+    # Score with ensemble
+    ensemble_suggestions = ensemble_scorer.score_lecture(
+        lecture=lecture_for_scorer,
+        all_tags=labels_for_scorer,
+        lecture_embedding=lecture_embedding,
+        tag_embeddings=tag_embeddings_cache,
+        lecturer_profile=lecturer_profile
+    )
+    
+    # Convert to v2 format
+    v2_suggestions = []
+    for sugg in ensemble_suggestions:
+        label = next((l for l in labels if l['id'] == sugg['tag_id']), None)
+        if not label:
+            continue
+        
+        reasons = ['ensemble']
+        if sugg.get('agreement_bonus_applied'):
+            reasons.append('model_agreement')
+        
+        v2_suggestions.append({
+            'label_id': sugg['tag_id'],
+            'category': label.get('category', 'Unknown'),
+            'confidence': sugg['score'],
+            'reasons': reasons,
+            'rationale_he': sugg.get('rationale', '')
+        })
+    
+    return v2_suggestions
+
+
 def score_lecture_v2(lecture: Dict, labels: List[Dict], scoring_mode: str = None) -> List[Dict]:
     """
     Router function for scoring modes.
     
     Modes:
+    - "ensemble": Reasoning + prototype combined (best accuracy, recommended)
     - "fast": Prototype similarity only (fastest, cheapest)
-    - "full_quality": Prototype + LLM arbiter (balanced, recommended)
-    - "reasoning": Pure LLM reasoning (highest quality, most expensive)
+    - "full_quality": Prototype + LLM arbiter (balanced)
+    - "reasoning": Pure LLM reasoning (high quality, most expensive)
     
     Args:
         lecture: Lecture dict
@@ -527,7 +649,9 @@ def score_lecture_v2(lecture: Dict, labels: List[Dict], scoring_mode: str = None
     
     logger.info(f"Scoring lecture {lecture.get('id')} with mode: {mode}")
     
-    if mode == "reasoning":
+    if mode == "ensemble":
+        return score_lecture_with_ensemble(lecture, labels)
+    elif mode == "reasoning":
         return score_lecture_with_reasoning(lecture, labels)
     elif mode == "full_quality":
         return score_lecture_with_arbiter(lecture, labels)
@@ -545,7 +669,7 @@ def suggest_tags():
         "request_id": "uuid",
         "model_version": "v1",
         "artifact_version": "labels-emb-2025-10-29",
-        "scoring_mode": "full_quality" (optional: "fast", "full_quality", "reasoning"),
+        "scoring_mode": "ensemble" (optional: "ensemble", "fast", "full_quality", "reasoning"),
         "lecture": {
             "id": "rec123",
             "title": "...",

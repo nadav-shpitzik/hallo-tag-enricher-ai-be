@@ -13,8 +13,8 @@ class Config:
         # Feature flags
         self.use_llm = kwargs.get('use_llm', os.getenv("USE_LLM", "true").lower() == "true")
         
-        # Scoring mode: "full_quality" (prototype + arbiter), "reasoning" (pure LLM), "fast" (prototype only)
-        self.scoring_mode = kwargs.get('scoring_mode', os.getenv("SCORING_MODE", "full_quality"))
+        # Scoring mode: "ensemble" (reasoning + prototype), "full_quality" (prototype + arbiter), "reasoning" (pure LLM), "fast" (prototype only)
+        self.scoring_mode = kwargs.get('scoring_mode', os.getenv("SCORING_MODE", "ensemble"))
         
         self.use_shortlist = kwargs.get('use_shortlist', os.getenv("USE_SHORTLIST", "true").lower() == "true")
         self.shortlist_fallback = kwargs.get('shortlist_fallback', os.getenv("SHORTLIST_FALLBACK", "true").lower() == "true")
@@ -44,6 +44,14 @@ class Config:
         # Reasoning mode calibration (LLMs tend to be over-confident)
         self.reasoning_confidence_scale = float(kwargs.get('reasoning_confidence_scale', 
                                                           os.getenv("REASONING_CONFIDENCE_SCALE", "0.85")))
+        
+        # Ensemble mode settings (combining reasoning + prototype scores)
+        self.ensemble_reasoning_weight = float(kwargs.get('ensemble_reasoning_weight',
+                                                         os.getenv("ENSEMBLE_REASONING_WEIGHT", "0.80")))
+        self.ensemble_prototype_weight = float(kwargs.get('ensemble_prototype_weight',
+                                                         os.getenv("ENSEMBLE_PROTOTYPE_WEIGHT", "0.20")))
+        self.ensemble_agreement_bonus = float(kwargs.get('ensemble_agreement_bonus',
+                                                        os.getenv("ENSEMBLE_AGREEMENT_BONUS", "0.15")))
         
         # Category-aware thresholds (v2)
         self.category_thresholds = {

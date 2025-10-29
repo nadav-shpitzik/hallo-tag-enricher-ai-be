@@ -51,45 +51,55 @@ Suggestion Flow:
 2. API loads prototypes from PostgreSQL (cached in memory)
 3. API generates embeddings for input lectures
 4. API scores lectures using selected scoring mode:
+   - ENSEMBLE: Reasoning (80%) + Prototype (20%) with agreement bonus (~3-4s) ✓ NEW DEFAULT
    - FAST: Prototype similarity only (~1s)
-   - FULL_QUALITY: Prototype + LLM arbiter for borderline (~2-3s) ✓ Recommended
+   - FULL_QUALITY: Prototype + LLM arbiter for borderline (~2-3s)
    - REASONING: Pure LLM analysis with Hebrew rationales (~5-7s)
 5. Returns suggestions above threshold with scores
 ```
 
 ### Scoring Modes
 
-The API supports three scoring modes that balance quality, speed, and cost:
+The API supports four scoring modes that balance quality, speed, and cost:
 
-**1. Fast Mode (`"fast"`)**
+**1. Ensemble Mode (`"ensemble"`)** ✓ **NEW DEFAULT - Best Accuracy**
+- Combines reasoning model (80%) + prototype model (20%)
+- When both models agree on a tag, applies +15% confidence bonus
+- Best accuracy, especially as training data grows
+- Moderate speed (~3-4 seconds per lecture)
+- Moderate cost (~$0.002-0.005 per lecture)
+- Provides detailed Hebrew rationales from reasoning model
+- **Auto-enrichment**: Searches for lecturer bio using GPT-4o if `lecturer_id` or `lecturer_name` provided
+- Best for: Highest accuracy needs, production tagging with growing training data
+
+**2. Fast Mode (`"fast"`)**
 - Uses only prototype similarity matching
 - Fastest option (~1 second per lecture)
 - Cheapest (~$0.0002 per lecture)
 - Good baseline quality
 - Best for: Batch processing, quick previews
 
-**2. Full Quality Mode (`"full_quality"`)** ✓ **Recommended Default**
+**3. Full Quality Mode (`"full_quality"`)**
 - Prototype scoring + LLM arbiter for borderline cases
 - Balanced speed (~2-3 seconds per lecture)
 - Moderate cost (~$0.001-0.003 per lecture)
 - LLM reviews uncertain suggestions (0.50-0.80 confidence)
 - Auto-approves high confidence (≥0.80)
 - Adds "llm_refined" reason to arbiter-approved suggestions
-- Best for: Production use, general tagging
+- Best for: Fast production use when ensemble is too slow
 
-**3. Reasoning Mode (`"reasoning"`)**
+**4. Reasoning Mode (`"reasoning"`)**
 - Pure GPT-4o-mini analysis of lecture content
-- Highest quality but slowest (~5-7 seconds per lecture)
+- High quality but slowest (~5-7 seconds per lecture)
 - Most expensive (~$0.004-0.008 per lecture)
 - Generates detailed Hebrew rationales for each suggestion
 - Confidence scores calibrated (scaled by 0.85 to prevent over-confidence)
 - Adds "rationale_he" field with explanations
 - **Auto-enrichment**: Searches for lecturer bio using GPT-4o if `lecturer_id` or `lecturer_name` provided
-- Lecturer bios validated and cached in database for instant reuse
-- Best for: Critical accuracy needs, when explanations are valuable
+- Best for: When training data is very limited, or when pure LLM reasoning is preferred
 
 **How to Use:**
-Add `"scoring_mode": "full_quality"` to your /suggest-tags request, or set the `SCORING_MODE` environment variable to change the default.
+Add `"scoring_mode": "ensemble"` to your /suggest-tags request, or set the `SCORING_MODE` environment variable to change the default.
 
 ## API Endpoints
 
@@ -344,6 +354,7 @@ src/
   ├── prototype_storage.py # PostgreSQL storage for prototypes with versioning
   ├── scorer.py         # Multi-mode scoring engine
   ├── reasoning_scorer.py # LLM-based reasoning scorer
+  ├── ensemble_scorer.py # Ensemble scorer (reasoning + prototype)
   ├── llm_arbiter.py    # LLM refinement logic
   ├── lecturer_search.py # Lecturer bio search with DB caching
   ├── csv_parser.py     # CSV file parser for training uploads
@@ -351,6 +362,14 @@ src/
 ```
 
 ## Recent Changes
+
+### 2025-10-29 (Latest): Ensemble Scoring Mode ✓ NEW DEFAULT
+- **New ensemble mode** combines reasoning (80%) + prototype (20%) scores
+- **Agreement bonus**: +15% when both models suggest the same tag
+- **Best accuracy**: Especially effective as training data grows
+- **Configuration**: Weights configurable via environment variables
+- **Auto-enrichment**: Inherits lecturer bio search from reasoning mode
+- **Benefits**: Higher accuracy than single models, balanced cost/performance
 
 ### 2025-10-29: CSV Upload Feature
 - **Added CSV training interface** at `/train-ui` for easy model training
