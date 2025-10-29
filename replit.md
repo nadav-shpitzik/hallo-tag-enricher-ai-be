@@ -79,6 +79,8 @@ The API supports three scoring modes that balance quality, speed, and cost:
 - Generates detailed Hebrew rationales for each suggestion
 - Confidence scores typically 0.85+
 - Adds "rationale_he" field with explanations
+- **Auto-enrichment**: Searches for lecturer bio using GPT-4o-mini if `lecturer_id` or `lecturer_name` provided
+- Lecturer bios cached in database for instant reuse
 - Best for: Critical accuracy needs, when explanations are valuable
 
 **How to Use:**
@@ -245,6 +247,43 @@ Configured in `src/config.py`:
 - **Min Confidence**: 0.60 (threshold for suggestions)
 - **Prototype Weight**: 0.8 (vs label weight 0.2 for low-data tags)
 
+## Lecturer Bio Enrichment
+
+**Available in Reasoning Mode only**
+
+When you provide `lecturer_id` and/or `lecturer_name` in your request, the reasoning mode automatically:
+
+1. **Searches for lecturer bio** using GPT-4o-mini
+   - First-time lookup: ~1-2 seconds, ~$0.001
+   - Searches for professional background, expertise, teaching style
+   
+2. **Caches in PostgreSQL database**
+   - Instant retrieval on subsequent requests
+   - Persists across server restarts
+   - Table: `lecturer_bios`
+   
+3. **Enriches LLM prompt**
+   - Adds lecturer expertise context
+   - Improves label accuracy
+   - Better understanding of lecture content
+
+**Cost**: One-time ~$0.001 per unique lecturer, then free (cached)
+
+**Example Request:**
+```json
+{
+  "scoring_mode": "reasoning",
+  "lecture": {
+    "id": "rec123",
+    "title": "קבלה ומיסטיקה",
+    "description": "...",
+    "lecturer_id": "recXYZ789",
+    "lecturer_name": "הרב משה כהן"
+  },
+  "labels": [...]
+}
+```
+
 ## Files Structure
 
 ```
@@ -259,6 +298,7 @@ src/
   ├── scorer.py         # Multi-mode scoring engine
   ├── reasoning_scorer.py # LLM-based reasoning scorer
   ├── llm_arbiter.py    # LLM refinement logic
+  ├── lecturer_search.py # Lecturer bio search with DB caching
   └── shortlist.py      # Candidate shortlist optimizer
 ```
 
