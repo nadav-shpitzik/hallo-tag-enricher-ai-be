@@ -210,6 +210,7 @@ def train_from_data(training_data: dict) -> dict:
         tag_stats=train_prototype_knn.tag_stats,
         tag_embeddings=tag_embeddings,
         num_lectures=len(lectures),
+        tags_data=tags_data,
         version_name='default'
     )
     logger.info(f"Saved prototypes to database as version {version_id}")

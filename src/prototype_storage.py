@@ -100,6 +100,7 @@ class PrototypeStorage:
         tag_stats: Dict[str, dict],
         tag_embeddings: Dict[str, np.ndarray],
         num_lectures: int,
+        tags_data: Dict[str, dict] = None,
         version_name: str = 'default'
     ) -> int:
         """
@@ -135,6 +136,11 @@ class PrototypeStorage:
                     stats = tag_stats.get(tag_id, {})
                     threshold = tag_thresholds.get(tag_id, 0.5)
                     
+                    # Get tag metadata from tags_data if available
+                    tag_info = tags_data.get(tag_id, {}) if tags_data else {}
+                    tag_name_he = tag_info.get('name_he', '')
+                    category = tag_info.get('category', 'Unknown')
+                    
                     cur.execute("""
                         INSERT INTO tag_prototypes 
                         (version_id, tag_id, tag_name_he, category, 
@@ -143,8 +149,8 @@ class PrototypeStorage:
                     """, (
                         version_id,
                         tag_id,
-                        stats.get('tag_name', ''),
-                        stats.get('category', 'Unknown'),
+                        tag_name_he,
+                        category,
                         Json(prototype.tolist()),
                         threshold,
                         stats.get('num_examples', 0),
