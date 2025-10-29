@@ -170,90 +170,117 @@ def train_from_data(training_data: dict) -> dict:
     }
 
 
-def score_lectures(lectures: List[Dict], tags: Dict[str, Dict]) -> List[Dict]:
+def score_lecture_v2(lecture: Dict, labels: List[Dict]) -> List[Dict]:
     """
-    Score lectures against prototypes.
+    Score a single lecture against prototypes (v2 format).
     
     Args:
-        lectures: List of lecture dicts with id, lecture_title, lecture_description
-        tags: Dict of tag data
+        lecture: Lecture dict with id, title, description, lecturer info, etc.
+        labels: List of label dicts with id, name_he, category, active
     
     Returns:
-        List of suggestions with lecture_id, tag_id, score, rationale
+        List of suggestions with label_id, category, confidence, reasons
     """
     if not prototypes_loaded:
         raise RuntimeError("Prototypes not loaded. Please train first or reload prototypes.")
     
-    # Generate embeddings for input lectures
+    # Convert to old format for embeddings
+    lecture_for_embedding = {
+        'id': lecture.get('id'),
+        'lecture_title': lecture.get('title', ''),
+        'lecture_description': lecture.get('description', '')
+    }
+    
+    # Generate embedding
     embeddings_gen = EmbeddingsGenerator(
         api_key=config.openai_api_key,
         model=config.embedding_model
     )
     
-    lecture_embeddings = embeddings_gen.generate_lecture_embeddings(lectures)
+    lecture_embeddings = embeddings_gen.generate_lecture_embeddings([lecture_for_embedding])
+    lecture_id = lecture.get('id')
     
-    # Score each lecture
-    all_suggestions = []
+    if lecture_id not in lecture_embeddings:
+        return []
     
-    for lecture in lectures:
-        lecture_id = lecture.get('id')
-        if lecture_id not in lecture_embeddings:
-            continue
-        
-        lecture_embedding = lecture_embeddings[lecture_id]
-        
-        # Get scores from prototype KNN
-        scores = prototype_knn.score_lecture(lecture_embedding, tag_embeddings_cache)
-        
-        # Convert to suggestions format
-        for tag_id, score in scores.items():
-            if tag_id in tags:
-                suggestion = {
-                    'lecture_id': lecture_id,
-                    'tag_id': tag_id,
-                    'tag_name_he': tags[tag_id].get('name_he', ''),
-                    'score': float(score),
-                    'rationale': f"Prototype similarity score: {score:.3f}"
-                }
-                all_suggestions.append(suggestion)
+    lecture_embedding = lecture_embeddings[lecture_id]
     
-    logger.info(f"Generated {len(all_suggestions)} suggestions for {len(lectures)} lectures")
-    return all_suggestions
+    # Get scores from prototype KNN
+    scores = prototype_knn.score_lecture(lecture_embedding, tag_embeddings_cache)
+    
+    # Create label lookup by id
+    labels_by_id = {label['id']: label for label in labels if label.get('active', True)}
+    
+    # Convert to suggestions format
+    suggestions = []
+    for label_id, score in scores.items():
+        if label_id in labels_by_id:
+            label = labels_by_id[label_id]
+            
+            # Determine reasons based on score
+            reasons = []
+            if score >= 0.8:
+                reasons.append("desc_match")
+            elif score >= 0.6:
+                reasons.append("title_match")
+            else:
+                reasons.append("cooccur")
+            
+            suggestion = {
+                'label_id': label_id,
+                'category': label.get('category', 'Unknown'),
+                'confidence': float(score),
+                'reasons': reasons
+            }
+            suggestions.append(suggestion)
+    
+    # Sort by confidence descending
+    suggestions.sort(key=lambda x: x['confidence'], reverse=True)
+    
+    return suggestions
 
 
 @app.route('/suggest-tags', methods=['POST'])
 def suggest_tags():
     """
-    Main API endpoint for tag suggestions.
+    Main API endpoint for tag suggestions (v2 format).
     
     Expected JSON format:
     {
-        "lectures": [
+        "request_id": "uuid",
+        "model_version": "v1",
+        "artifact_version": "labels-emb-2025-10-29",
+        "lecture": {
+            "id": "rec123",
+            "title": "...",
+            "description": "...",
+            "lecturer_id": "..." (optional),
+            "lecturer_name": "..." (optional),
+            "lecturer_role": "..." (optional),
+            "language": "he" (optional),
+            "related_lectures": [...] (optional)
+        },
+        "labels": [
             {
-                "id": "lec_123",
-                "lecture_title": "...",
-                "lecture_description": "...",
-                "lecturer_name": "..." (optional)
-            }
-        ],
-        "tags": {
-            "tag1": {
-                "tag_id": "tag1",
+                "id": "lab_topic_mental_health",
                 "name_he": "...",
-                "synonyms_he": "..."
+                "category": "Topic",
+                "active": true
             }
-        }
+        ]
     }
     
     Returns:
     {
+        "request_id": "uuid",
+        "model_version": "v1",
+        "artifact_version": "labels-emb-2025-10-29",
         "suggestions": [
             {
-                "lecture_id": "lec_123",
-                "tag_id": "tag1",
-                "tag_name_he": "...",
-                "score": 0.85,
-                "rationale": "..."
+                "label_id": "lab_topic_mental_health",
+                "category": "Topic",
+                "confidence": 0.91,
+                "reasons": ["desc_match", "related_cooccur"]
             }
         ]
     }
@@ -264,23 +291,29 @@ def suggest_tags():
         if not data:
             return jsonify({'error': 'No JSON data provided'}), 400
         
-        lectures = data.get('lectures', [])
-        tags = data.get('tags', {})
+        request_id = data.get('request_id')
+        model_version = data.get('model_version', 'v1')
+        artifact_version = data.get('artifact_version', 'unknown')
+        lecture = data.get('lecture')
+        labels = data.get('labels', [])
         
-        if not lectures:
-            return jsonify({'error': 'No lectures provided'}), 400
+        if not lecture:
+            return jsonify({'error': 'No lecture provided'}), 400
         
-        if not tags:
-            return jsonify({'error': 'No tags provided'}), 400
+        if not labels:
+            return jsonify({'error': 'No labels provided'}), 400
         
-        # Score lectures
-        suggestions = score_lectures(lectures, tags)
+        # Score lecture
+        suggestions = score_lecture_v2(lecture, labels)
         
-        return jsonify({
-            'suggestions': suggestions,
-            'num_lectures': len(lectures),
-            'num_suggestions': len(suggestions)
-        }), 200
+        response = {
+            'request_id': request_id,
+            'model_version': model_version,
+            'artifact_version': artifact_version,
+            'suggestions': suggestions
+        }
+        
+        return jsonify(response), 200
         
     except Exception as e:
         logger.error(f"Error in suggest-tags: {e}")
@@ -294,7 +327,28 @@ def train():
     """
     Train prototypes from training data.
     
-    Expected JSON format:
+    Supports both old and new formats:
+    
+    New format (v2):
+    {
+        "lectures": [
+            {
+                "id": "rec123",
+                "title": "...",
+                "description": "...",
+                "label_ids": ["lab_topic_mental_health"]
+            }
+        ],
+        "labels": [
+            {
+                "id": "lab_topic_mental_health",
+                "name_he": "...",
+                "category": "Topic"
+            }
+        ]
+    }
+    
+    Old format (v1):
     {
         "lectures": [
             {
@@ -318,6 +372,36 @@ def train():
         
         if not training_data:
             return jsonify({'error': 'No JSON data provided'}), 400
+        
+        # Detect format and convert to old format if needed
+        if 'labels' in training_data and isinstance(training_data.get('labels'), list):
+            # New format (v2) - convert to old format
+            lectures = training_data.get('lectures', [])
+            labels = training_data.get('labels', [])
+            
+            # Convert labels array to tags dict
+            tags = {}
+            for label in labels:
+                tags[label['id']] = {
+                    'tag_id': label['id'],
+                    'name_he': label.get('name_he', ''),
+                    'synonyms_he': label.get('synonyms_he', '')
+                }
+            
+            # Convert lectures to old format
+            converted_lectures = []
+            for lecture in lectures:
+                converted_lectures.append({
+                    'id': lecture.get('id'),
+                    'lecture_title': lecture.get('title', ''),
+                    'lecture_description': lecture.get('description', ''),
+                    'lecture_tag_ids': lecture.get('label_ids', [])
+                })
+            
+            training_data = {
+                'lectures': converted_lectures,
+                'tags': tags
+            }
         
         result = train_from_data(training_data)
         
