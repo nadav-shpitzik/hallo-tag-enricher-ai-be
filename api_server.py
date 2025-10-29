@@ -1146,13 +1146,40 @@ def index():
             .status.loaded { background: #4CAF50; color: white; }
             .status.not-loaded { background: #f44336; color: white; }
             code { background: #e8e8e8; padding: 2px 6px; border-radius: 3px; font-family: 'Courier New', monospace; }
+            .cta-button {
+                display: inline-block;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 12px 24px;
+                border-radius: 8px;
+                text-decoration: none;
+                font-weight: 600;
+                margin: 20px 10px 20px 0;
+                box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+                transition: transform 0.2s, box-shadow 0.2s;
+            }
+            .cta-button:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+            }
+            .header-section {
+                background: white;
+                border-radius: 8px;
+                padding: 20px;
+                margin: 20px 0;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
         </style>
     </head>
     <body>
         <h1>🏷️ Tag Suggestions API</h1>
-        <p>AI-powered Hebrew lecture tagging using OpenAI embeddings and prototype learning.</p>
-        <div class="status """ + ("loaded" if prototypes_loaded else "not-loaded") + """">
-            """ + ("✓ Prototypes Loaded: " + str(len(prototype_knn.tag_prototypes)) if prototypes_loaded else "⚠ No Prototypes - Train First") + """
+        
+        <div class="header-section">
+            <p>AI-powered Hebrew lecture tagging using OpenAI embeddings and prototype learning.</p>
+            <div class="status """ + ("loaded" if prototypes_loaded else "not-loaded") + """">
+                """ + ("✓ Prototypes Loaded: " + str(len(prototype_knn.tag_prototypes)) if prototypes_loaded else "⚠ No Prototypes - Train First") + """
+            </div>
+            <a href="/train-ui" class="cta-button">🎓 Upload CSV & Train Model</a>
         </div>
 
         <h2>📋 API Endpoints</h2>
