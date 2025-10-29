@@ -51,10 +51,10 @@ Suggestion Flow:
 2. API loads prototypes from PostgreSQL (cached in memory)
 3. API generates embeddings for input lectures
 4. API scores lectures using selected scoring mode:
-   - ENSEMBLE: Reasoning (80%) + Prototype (20%) with agreement bonus (~3-4s) ✓ NEW DEFAULT
+   - ENSEMBLE: Reasoning (80%) + Prototype (20%) with agreement bonus (~5-7s, ~3-4s cached) ✓ NEW DEFAULT
    - FAST: Prototype similarity only (~1s)
    - FULL_QUALITY: Prototype + LLM arbiter for borderline (~2-3s)
-   - REASONING: Pure LLM analysis with Hebrew rationales (~5-7s)
+   - REASONING: Pure LLM analysis with Hebrew rationales (~5-7s, ~3-4s cached)
 5. Returns suggestions above threshold with scores
 ```
 
@@ -66,8 +66,8 @@ The API supports four scoring modes that balance quality, speed, and cost:
 - Combines reasoning model (80%) + prototype model (20%)
 - When both models agree on a tag, applies +15% confidence bonus
 - Best accuracy, especially as training data grows
-- Moderate speed (~3-4 seconds per lecture)
-- Moderate cost (~$0.002-0.005 per lecture)
+- Similar speed to reasoning (~5-7 seconds per lecture, ~3-4s if lecturer bio cached)
+- Similar cost to reasoning (~$0.002-0.005 per lecture)
 - Provides detailed Hebrew rationales from reasoning model
 - **Auto-enrichment**: Searches for lecturer bio using GPT-4o if `lecturer_id` or `lecturer_name` provided
 - Best for: Highest accuracy needs, production tagging with growing training data
@@ -90,8 +90,8 @@ The API supports four scoring modes that balance quality, speed, and cost:
 
 **4. Reasoning Mode (`"reasoning"`)**
 - Pure GPT-4o-mini analysis of lecture content
-- High quality but slowest (~5-7 seconds per lecture)
-- Most expensive (~$0.004-0.008 per lecture)
+- High quality (~5-7 seconds per lecture, ~3-4s if lecturer bio cached)
+- Similar cost to ensemble (~$0.002-0.005 per lecture)
 - Generates detailed Hebrew rationales for each suggestion
 - Confidence scores calibrated (scaled by 0.85 to prevent over-confidence)
 - Adds "rationale_he" field with explanations
