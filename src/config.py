@@ -41,6 +41,10 @@ class Config:
         self.llm_borderline_lower = 0.50
         self.llm_borderline_upper = 0.80
         
+        # Reasoning mode calibration (LLMs tend to be over-confident)
+        self.reasoning_confidence_scale = float(kwargs.get('reasoning_confidence_scale', 
+                                                          os.getenv("REASONING_CONFIDENCE_SCALE", "0.85")))
+        
         # Category-aware thresholds (v2)
         self.category_thresholds = {
             'Topic': 0.65,

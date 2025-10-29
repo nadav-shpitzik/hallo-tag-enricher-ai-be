@@ -17,10 +17,11 @@ class TaggingResponse(BaseModel):
     reasoning_summary: str
 
 class ReasoningScorer:
-    def __init__(self, model: str = "gpt-4o-mini", min_confidence: float = 0.85):
+    def __init__(self, model: str = "gpt-4o-mini", min_confidence: float = 0.85, confidence_scale: float = 0.85):
         self.client = OpenAI()
         self.model = model
         self.min_confidence = min_confidence
+        self.confidence_scale = confidence_scale  # Calibration factor for over-confident LLMs
     
     def score_lecture(
         self,
@@ -44,12 +45,13 @@ class ReasoningScorer:
                         "content": """אתה מומחה בתיוג הרצאות בעברית. תפקידך לקרוא את תוכן ההרצאה ולהציע תגיות רלוונטיות.
 
 כללים חשובים:
-1. הצע רק תגיות שאתה בטוח בהן ברמת ביטחון של 85% ומעלה
-2. התמקד בנושא המרכזי של ההרצאה - אל תציע יותר מדי תגיות
-3. השתמש במידע על המרצה כדי להבין טוב יותר את תוכן ההרצאה
-4. תן נימוק ברור בעברית למה התגית מתאימה
-5. אם אין תגיות מתאימות - אל תציע כלום
-6. העדף דיוק (precision) על פני כיסוי (recall) - עדיף פחות תגיות נכונות מאשר תגיות שגויות"""
+1. היה **שמרן** ברמת הביטחון - הצע רק תגיות שהן ממש רלוונטיות
+2. השתמש ברמות ביטחון שונות: 0.60-0.70 לרלוונטיות בסיסית, 0.70-0.80 לרלוונטיות טובה, 0.80-0.95 רק לרלוונטיות מצוינת ומובהקת
+3. התמקד בנושא המרכזי של ההרצאה - אל תציע יותר מדי תגיות
+4. השתמש במידע על המרצה כדי להבין טוב יותר את תוכן ההרצאה
+5. תן נימוק ברור בעברית למה התגית מתאימה
+6. אם אין תגיות מתאימות - אל תציע כלום
+7. העדף דיוק (precision) על פני כיסוי (recall) - עדיף פחות תגיות נכונות מאשר תגיות שגויות"""
                     },
                     {
                         "role": "user",
@@ -66,28 +68,28 @@ class ReasoningScorer:
                 logger.warning(f"No parsed result for lecture {lecture.get('id')}")
                 return []
             
-            high_confidence_suggestions = [
-                sugg for sugg in result.suggestions 
-                if sugg.confidence >= self.min_confidence
-            ]
-            
             # Create tag_id validation set
             valid_tag_ids = {tag['tag_id'] for tag in all_tags}
             
             formatted_suggestions = []
-            for sugg in high_confidence_suggestions:
+            for sugg in result.suggestions:
                 # Validate tag_id exists in our tags list
                 if sugg.tag_id not in valid_tag_ids:
                     logger.warning(f"LLM hallucinated invalid tag_id '{sugg.tag_id}' for tag '{sugg.tag_name_he}' - skipping")
                     continue
-                    
-                formatted_suggestions.append({
-                    'tag_id': sugg.tag_id,
-                    'tag_name_he': sugg.tag_name_he,
-                    'score': sugg.confidence,
-                    'rationale': sugg.rationale_he,
-                    'model': f'reasoning:{self.model}'
-                })
+                
+                # Apply confidence calibration (LLMs tend to be over-confident)
+                calibrated_confidence = sugg.confidence * self.confidence_scale
+                
+                # Only include if calibrated confidence meets threshold
+                if calibrated_confidence >= self.min_confidence:
+                    formatted_suggestions.append({
+                        'tag_id': sugg.tag_id,
+                        'tag_name_he': sugg.tag_name_he,
+                        'score': calibrated_confidence,
+                        'rationale': sugg.rationale_he,
+                        'model': f'reasoning:{self.model}'
+                    })
             
             logger.debug(f"Lecture {lecture.get('id')}: {len(formatted_suggestions)} high-confidence suggestions (filtered from {len(result.suggestions)} total)")
             

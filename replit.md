@@ -77,10 +77,10 @@ The API supports three scoring modes that balance quality, speed, and cost:
 - Highest quality but slowest (~5-7 seconds per lecture)
 - Most expensive (~$0.004-0.008 per lecture)
 - Generates detailed Hebrew rationales for each suggestion
-- Confidence scores typically 0.85+
+- Confidence scores calibrated (scaled by 0.85 to prevent over-confidence)
 - Adds "rationale_he" field with explanations
-- **Auto-enrichment**: Searches for lecturer bio using GPT-4o-mini if `lecturer_id` or `lecturer_name` provided
-- Lecturer bios cached in database for instant reuse
+- **Auto-enrichment**: Searches for lecturer bio using GPT-4o if `lecturer_id` or `lecturer_name` provided
+- Lecturer bios validated and cached in database for instant reuse
 - Best for: Critical accuracy needs, when explanations are valuable
 
 **How to Use:**

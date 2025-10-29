@@ -453,7 +453,8 @@ def score_lecture_with_reasoning(lecture: Dict, labels: List[Dict]) -> List[Dict
     """
     scorer = ReasoningScorer(
         model=config.llm_model,
-        min_confidence=config.min_confidence_threshold
+        min_confidence=config.min_confidence_threshold,
+        confidence_scale=config.reasoning_confidence_scale
     )
     
     # Fetch lecturer bio if available
