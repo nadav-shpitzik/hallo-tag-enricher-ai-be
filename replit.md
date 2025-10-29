@@ -4,11 +4,12 @@
 A stateless REST API for suggesting tags to Hebrew lectures using AI-powered semantic analysis. The system uses OpenAI embeddings and prototype learning to provide intelligent tag suggestions.
 
 ## Project Type
-**Stateless REST API**
-- No database dependencies
-- All data provided via API payloads
-- Pre-computed prototypes stored in Replit KV store
+**REST API with PostgreSQL Storage**
+- Stateless request handling  
+- All lecture/label data provided via API payloads
+- Pre-computed prototypes stored in PostgreSQL with versioning
 - Fast, scalable tag suggestion endpoint
+- Database used for: prototypes storage, lecturer bios cache
 
 ## Architecture
 
@@ -18,32 +19,36 @@ A stateless REST API for suggesting tags to Hebrew lectures using AI-powered sem
    - Generates embeddings using OpenAI text-embedding-3-large
    - Computes tag prototypes (centroids) from training data
    - Calibrates per-tag confidence thresholds
-   - Saves prototypes to Replit KV store
+   - Saves prototypes to PostgreSQL with versioning
 
 2. **Suggestion Endpoint** (`POST /suggest-tags`)
    - Accepts new lectures to tag as JSON
-   - Loads pre-computed prototypes from KV store
+   - Loads pre-computed prototypes from PostgreSQL (cached in memory)
    - Generates embeddings for input lectures
    - Scores against prototypes using cosine similarity
    - Returns tag suggestions with confidence scores
 
 3. **Reload Endpoint** (`POST /reload-prototypes`)
-   - Reloads prototypes from KV store without restart
+   - Reloads prototypes from PostgreSQL without restart
    - Useful after retraining prototypes
+
+4. **Visibility Endpoints** (NEW)
+   - `GET /prototype-versions`: List all prototype versions with metadata
+   - `GET /tag-info/<tag_id>`: Get detailed info about a specific tag (threshold, examples, vector dimension)
 
 ### Data Flow
 ```
 Training Flow:
-1. Client sends training lectures + tags via POST /train
+1. Client sends training lectures + tags via POST /train (or CSV via POST /train-csv)
 2. API generates embeddings for lectures and tags
 3. API builds prototypes (centroids per tag)
 4. API calibrates thresholds for precision
-5. API saves prototypes to Replit KV store
+5. API saves prototypes to PostgreSQL with version tracking
 6. Returns training summary
 
 Suggestion Flow:
 1. Client sends lectures + tags via POST /suggest-tags
-2. API loads prototypes from KV store (cached in memory)
+2. API loads prototypes from PostgreSQL (cached in memory)
 3. API generates embeddings for input lectures
 4. API scores lectures using selected scoring mode:
    - FAST: Prototype similarity only (~1s)
@@ -333,9 +338,10 @@ train_prototypes.py     # Standalone training script (CLI/API mode)
 test_api.py             # Test script for API validation
 
 src/
-  ├── config.py         # Configuration (no database dependencies)
+  ├── config.py         # Configuration settings
   ├── embeddings.py     # OpenAI embeddings generation
   ├── prototype_knn.py  # Prototype learning and scoring
+  ├── prototype_storage.py # PostgreSQL storage for prototypes with versioning
   ├── scorer.py         # Multi-mode scoring engine
   ├── reasoning_scorer.py # LLM-based reasoning scorer
   ├── llm_arbiter.py    # LLM refinement logic
@@ -353,20 +359,26 @@ src/
 - **Web UI** with beautiful gradient design, file upload, progress tracking, and training stats
 - **Benefits**: Upload CSVs directly from Airtable/database exports, no manual JSON formatting needed
 
-### 2025-10-27: API Transformation
-- **Removed all database dependencies** (PostgreSQL, psycopg2)
-- **Stateless design**: All data via API payloads
-- **Replit KV Store**: Prototypes stored in key-value store
+### 2025-10-29 (Later): PostgreSQL Prototype Storage
+- **Migrated from KV to PostgreSQL** for better visibility and learning
+- **Versioning system**: Track prototype changes over time
+- **New tables**: `prototype_versions`, `tag_prototypes`, `tag_embeddings`
+- **New endpoints**: `/prototype-versions`, `/tag-info/<tag_id>` for data visibility
+- **Benefits**: SQL queryable, versioned history, easier debugging
+
+### 2025-10-27: API Transformation  
+- **Stateless design**: All lecture/label data via API payloads (no longer loaded from database)
 - **Combined endpoints**: Training and suggestions in one API
 - **Removed components**: Web viewer, Airtable sync, batch processing
 - **Kept core AI logic**: Embeddings, prototypes, scoring, LLM arbiter
 
 ### Benefits
-- ✓ **Portable**: No database setup required
-- ✓ **Stateless**: Each request is independent
-- ✓ **Fast**: Pre-computed prototypes loaded in memory
+- ✓ **Visible**: Query prototypes directly with SQL
+- ✓ **Versioned**: Track how prototypes evolve over time
+- ✓ **Stateless requests**: Each suggestion request is independent
+- ✓ **Fast**: Pre-computed prototypes cached in memory
 - ✓ **Scalable**: Train once, serve many
-- ✓ **Simple**: Single API server, clear endpoints
+- ✓ **Learnable**: Inspect thresholds, embeddings, training stats
 
 ## Dependencies
 - `openai` - Embeddings and LLM

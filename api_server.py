@@ -3,9 +3,9 @@
 Stateless API for tag suggestions.
 
 Endpoints:
-- POST /train: Train prototypes from training data and save to KV store
+- POST /train: Train prototypes from training data and save to PostgreSQL
 - POST /suggest-tags: Get tag suggestions for lectures  
-- POST /reload-prototypes: Reload prototypes from KV store
+- POST /reload-prototypes: Reload prototypes from PostgreSQL
 - GET /health: Health check
 - GET /: API information
 """
@@ -24,6 +24,7 @@ from src.llm_arbiter import LLMArbiter
 from src.reasoning_scorer import ReasoningScorer
 from src.lecturer_search import LecturerSearchService
 from src.csv_parser import parse_csv_training_data
+from src.prototype_storage import PrototypeStorage
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,67 +41,43 @@ tag_embeddings_cache = None
 config = None
 
 
-def load_prototypes_from_kv():
-    """Load prototypes from Replit KV store."""
+def load_prototypes_from_db():
+    """Load prototypes from PostgreSQL database."""
     global prototypes_loaded, prototype_knn, tag_embeddings_cache, config
     
     try:
-        if "prototypes" not in db.keys():
-            logger.error("No prototypes found in KV store. Please train first.")
+        storage = PrototypeStorage()
+        result = storage.load_prototypes(version_name='default')
+        
+        if not result:
+            logger.error("No prototypes found in database. Please train first.")
             return False
         
-        prototypes_json = db["prototypes"]
-        prototypes_data = json.loads(prototypes_json)
+        tag_prototypes, tag_thresholds, tag_stats, tag_embeddings = result
         
         # Initialize config
         config = Config()
         
         # Create PrototypeKNN instance
         prototype_knn = PrototypeKNN(config)
+        prototype_knn.tag_prototypes = tag_prototypes
+        prototype_knn.tag_thresholds = tag_thresholds
+        prototype_knn.tag_stats = tag_stats
         
-        # Load tag prototypes (convert lists back to numpy arrays)
-        prototype_knn.tag_prototypes = {
-            tag_id: np.array(proto, dtype=np.float32)
-            for tag_id, proto in prototypes_data['tag_prototypes'].items()
-        }
-        
-        # Load tag thresholds
-        prototype_knn.tag_thresholds = prototypes_data['tag_thresholds']
-        
-        # Load tag stats
-        prototype_knn.tag_stats = prototypes_data['tag_stats']
-        
-        # Load tag embeddings
-        tag_embeddings_cache = {
-            tag_id: np.array(emb, dtype=np.float32)
-            for tag_id, emb in prototypes_data['tag_embeddings'].items()
-        }
+        # Set tag embeddings cache
+        tag_embeddings_cache = tag_embeddings
         
         prototypes_loaded = True
-        logger.info(f"Loaded {len(prototype_knn.tag_prototypes)} prototypes from KV store")
+        logger.info(f"Loaded {len(prototype_knn.tag_prototypes)} prototypes from database")
         return True
         
     except Exception as e:
-        logger.error(f"Error loading prototypes: {e}")
+        logger.error(f"Error loading prototypes from database: {e}")
         import traceback
         traceback.print_exc()
         return False
 
 
-def serialize_prototypes(prototype_knn_inst: PrototypeKNN, tag_embeddings: Dict[str, np.ndarray]) -> dict:
-    """Convert prototype data to JSON-serializable format."""
-    return {
-        'tag_prototypes': {
-            tag_id: proto.tolist() 
-            for tag_id, proto in prototype_knn_inst.tag_prototypes.items()
-        },
-        'tag_thresholds': prototype_knn_inst.tag_thresholds,
-        'tag_stats': prototype_knn_inst.tag_stats,
-        'tag_embeddings': {
-            tag_id: emb.tolist()
-            for tag_id, emb in tag_embeddings.items()
-        }
-    }
 
 
 def validate_training_data(lectures: List[Dict], tags_data: Dict) -> Dict[str, any]:
@@ -225,12 +202,17 @@ def train_from_data(training_data: dict) -> dict:
     # Calibrate thresholds
     train_prototype_knn.calibrate_thresholds(lectures, lecture_embeddings, tag_embeddings)
     
-    # Serialize and save to KV store
-    prototypes_data = serialize_prototypes(train_prototype_knn, tag_embeddings)
-    
-    # Save to Replit KV store
-    db["prototypes"] = json.dumps(prototypes_data)
-    logger.info("Saved prototypes to Replit KV store")
+    # Save to PostgreSQL database
+    storage = PrototypeStorage()
+    version_id = storage.save_prototypes(
+        tag_prototypes=train_prototype_knn.tag_prototypes,
+        tag_thresholds=train_prototype_knn.tag_thresholds,
+        tag_stats=train_prototype_knn.tag_stats,
+        tag_embeddings=tag_embeddings,
+        num_lectures=len(lectures),
+        version_name='default'
+    )
+    logger.info(f"Saved prototypes to database as version {version_id}")
     
     # Return summary with validation stats
     return {
@@ -721,7 +703,7 @@ def train():
         result = train_from_data(training_data)
         
         # Automatically reload prototypes after training
-        load_prototypes_from_kv()
+        load_prototypes_from_db()
         
         return jsonify(result), 200
         
@@ -798,7 +780,7 @@ def train_csv():
         })
         
         # Automatically reload prototypes after training
-        load_prototypes_from_kv()
+        load_prototypes_from_db()
         
         return jsonify(result), 200
         
@@ -813,7 +795,7 @@ def train_csv():
 def reload_prototypes():
     """Reload prototypes from KV store without restarting server."""
     try:
-        success = load_prototypes_from_kv()
+        success = load_prototypes_from_db()
         
         if success:
             return jsonify({
@@ -838,6 +820,37 @@ def health():
         'prototypes_loaded': prototypes_loaded,
         'num_prototypes': len(prototype_knn.tag_prototypes) if prototypes_loaded else 0
     }), 200
+
+
+@app.route('/prototype-versions', methods=['GET'])
+def list_prototype_versions():
+    """List all prototype versions stored in the database."""
+    try:
+        storage = PrototypeStorage()
+        versions = storage.list_versions()
+        return jsonify({
+            'versions': versions,
+            'count': len(versions)
+        }), 200
+    except Exception as e:
+        logger.error(f"Error listing versions: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/tag-info/<tag_id>', methods=['GET'])
+def get_tag_info(tag_id: str):
+    """Get detailed information about a specific tag from the database."""
+    try:
+        storage = PrototypeStorage()
+        info = storage.get_tag_info(tag_id, version_name='default')
+        
+        if not info:
+            return jsonify({'error': f'Tag {tag_id} not found'}), 404
+        
+        return jsonify(info), 200
+    except Exception as e:
+        logger.error(f"Error getting tag info: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/train-ui', methods=['GET'])
@@ -1400,7 +1413,7 @@ def index():
 if __name__ == '__main__':
     # Load prototypes on startup
     logger.info("Starting Tag Suggestions API...")
-    load_prototypes_from_kv()
+    load_prototypes_from_db()
     
     port = int(os.getenv('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
