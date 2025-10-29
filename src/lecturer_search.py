@@ -7,7 +7,7 @@ in PostgreSQL for fast subsequent lookups.
 
 import logging
 import os
-from typing import Optional
+from typing import Optional, Tuple
 from datetime import datetime
 import psycopg2
 from openai import OpenAI
@@ -49,9 +49,9 @@ class LecturerSearchService:
             return None
         
         # Try database cache first
-        cached_bio = self._get_from_cache(lecturer_id, lecturer_name)
-        if cached_bio:
-            logger.info(f"Lecturer bio found in cache: {lecturer_id or lecturer_name}")
+        cached_bio, cache_hit = self._get_from_cache(lecturer_id, lecturer_name)
+        if cache_hit:
+            logger.info(f"Lecturer bio cache hit: {lecturer_id or lecturer_name} (bio: {'found' if cached_bio else 'not found'})")
             return cached_bio
         
         # Not in cache - search using LLM
@@ -62,8 +62,8 @@ class LecturerSearchService:
         logger.info(f"Searching for bio: {lecturer_name}")
         bio = self._search_with_llm(lecturer_name)
         
-        # Save to cache if found
-        if bio and lecturer_id:
+        # Save to cache (even if None - to avoid repeated searches)
+        if lecturer_id:
             self._save_to_cache(lecturer_id, lecturer_name, bio)
         
         return bio
@@ -72,10 +72,16 @@ class LecturerSearchService:
         self,
         lecturer_id: Optional[str],
         lecturer_name: Optional[str]
-    ) -> Optional[str]:
-        """Check database for cached bio."""
+    ) -> Tuple[Optional[str], bool]:
+        """
+        Check database for cached bio.
+        
+        Returns:
+            (bio_text, cache_hit) - bio_text can be None if searched but not found,
+                                    cache_hit is True if we found a cached entry
+        """
         if not self.database_url:
-            return None
+            return (None, False)
             
         try:
             conn = psycopg2.connect(self.database_url)
@@ -99,19 +105,22 @@ class LecturerSearchService:
             cursor.close()
             conn.close()
             
-            return result[0] if result else None
+            # Return (bio, cache_hit)
+            if result:
+                return (result[0], True)  # Cache hit - bio could be None if not found
+            return (None, False)  # Cache miss - not in cache at all
             
         except Exception as e:
             logger.error(f"Error fetching from cache: {e}")
-            return None
+            return (None, False)
     
     def _save_to_cache(
         self,
         lecturer_id: str,
         lecturer_name: str,
-        bio_text: str
+        bio_text: Optional[str]
     ) -> None:
-        """Save bio to database cache."""
+        """Save bio to database cache (None if not found)."""
         if not self.database_url:
             return
             
@@ -158,20 +167,17 @@ class LecturerSearchService:
                     {
                         "role": "system",
                         "content": """You are a research assistant helping to find information about lecturers and speakers.
-                        
-When given a lecturer's name, search for their professional background, expertise, and areas of teaching.
-Focus on:
-- Their main topics of expertise
-- Academic background
-- Teaching style or approach
-- Notable works or contributions
 
-Keep the response concise (2-3 sentences) and focus on information relevant to understanding their lectures.
-If you cannot find reliable information, respond with "לא נמצא מידע" (information not found)."""
+When given a name, provide a concise professional background (2-3 sentences) focusing on:
+- Their main expertise or field
+- Professional background or achievements
+- Areas they teach or speak about
+
+Write in Hebrew. If the person is well-known, provide relevant details. Make a reasonable attempt even with limited information - better to provide some context than none."""
                     },
                     {
                         "role": "user",
-                        "content": f"מצא מידע מקצועי על המרצה: {lecturer_name}"
+                        "content": f"ספר לי בקצרה על: {lecturer_name}"
                     }
                 ],
                 temperature=0.3,
@@ -180,13 +186,13 @@ If you cannot find reliable information, respond with "לא נמצא מידע" (
             
             bio = response.choices[0].message.content.strip()
             
-            # Check if LLM couldn't find info
-            if "לא נמצא מידע" in bio or "information not found" in bio.lower():
-                logger.info(f"No reliable info found for: {lecturer_name}")
+            # Return the bio (LLM will provide context even with limited info)
+            if bio and len(bio) > 10:  # Basic sanity check
+                logger.info(f"Found bio for {lecturer_name}: {bio[:100]}...")
+                return bio
+            else:
+                logger.info(f"No bio generated for: {lecturer_name}")
                 return None
-            
-            logger.info(f"Found bio for {lecturer_name}: {bio[:100]}...")
-            return bio
             
         except Exception as e:
             logger.error(f"Error searching with LLM: {e}")
