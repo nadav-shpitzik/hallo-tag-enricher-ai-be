@@ -23,6 +23,7 @@ from src.config import Config
 from src.llm_arbiter import LLMArbiter
 from src.reasoning_scorer import ReasoningScorer
 from src.lecturer_search import LecturerSearchService
+from src.csv_parser import parse_csv_training_data
 
 logging.basicConfig(
     level=logging.INFO,
@@ -731,6 +732,83 @@ def train():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/train-csv', methods=['POST'])
+def train_csv():
+    """
+    Train prototypes from uploaded CSV files.
+    
+    Expected files:
+    - lectures.csv: Lecture data (id, title, description, lecturer_id)
+    - labels.csv: Label data (id, name, category)
+    - lecture_labels.csv: Junction table (lecture_id, label_id)
+    """
+    try:
+        # Check for required files
+        if 'lectures' not in request.files:
+            return jsonify({'error': 'Missing lectures.csv file'}), 400
+        if 'labels' not in request.files:
+            return jsonify({'error': 'Missing labels.csv file'}), 400
+        if 'lecture_labels' not in request.files:
+            return jsonify({'error': 'Missing lecture_labels.csv file'}), 400
+        
+        # Read file contents
+        lectures_csv = request.files['lectures'].read()
+        labels_csv = request.files['labels'].read()
+        lecture_labels_csv = request.files['lecture_labels'].read()
+        
+        logger.info("Parsing CSV files...")
+        
+        # Parse CSV data
+        training_data = parse_csv_training_data(
+            lectures_csv,
+            labels_csv,
+            lecture_labels_csv
+        )
+        
+        logger.info(f"Parsed {len(training_data['lectures'])} lectures with {len(training_data['labels'])} labels")
+        
+        # Convert labels list to tags dict (same as /train endpoint)
+        lectures = training_data.get('lectures', [])
+        labels = training_data.get('labels', [])
+        
+        # Convert labels array to tags dict (preserve category)
+        tags = {}
+        for label in labels:
+            tags[label['id']] = {
+                'tag_id': label['id'],
+                'name_he': label.get('name_he', ''),
+                'synonyms_he': label.get('synonyms_he', ''),
+                'category': label.get('category', 'Unknown')
+            }
+        
+        # Convert lectures to old format
+        converted_lectures = []
+        for lecture in lectures:
+            converted_lectures.append({
+                'id': lecture.get('id'),
+                'lecture_title': lecture.get('title', ''),
+                'lecture_description': lecture.get('description', ''),
+                'lecture_tag_ids': lecture.get('label_ids', [])
+            })
+        
+        # Train using existing logic
+        result = train_from_data({
+            'lectures': converted_lectures,
+            'tags': tags
+        })
+        
+        # Automatically reload prototypes after training
+        load_prototypes_from_kv()
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        logger.error(f"CSV training error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/reload-prototypes', methods=['POST'])
 def reload_prototypes():
     """Reload prototypes from KV store without restarting server."""
@@ -760,6 +838,243 @@ def health():
         'prototypes_loaded': prototypes_loaded,
         'num_prototypes': len(prototype_knn.tag_prototypes) if prototypes_loaded else 0
     }), 200
+
+
+@app.route('/train-ui', methods=['GET'])
+def train_ui():
+    """Web UI for CSV upload and training."""
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Train Model - CSV Upload</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+            }
+            .container {
+                background: white;
+                border-radius: 12px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                max-width: 600px;
+                width: 100%;
+                padding: 40px;
+            }
+            h1 {
+                color: #2d3748;
+                margin-bottom: 10px;
+                font-size: 28px;
+            }
+            .subtitle {
+                color: #718096;
+                margin-bottom: 30px;
+                font-size: 14px;
+            }
+            .file-upload {
+                margin-bottom: 20px;
+            }
+            label {
+                display: block;
+                color: #4a5568;
+                font-weight: 600;
+                margin-bottom: 8px;
+                font-size: 14px;
+            }
+            input[type="file"] {
+                width: 100%;
+                padding: 12px;
+                border: 2px dashed #cbd5e0;
+                border-radius: 8px;
+                background: #f7fafc;
+                cursor: pointer;
+                transition: all 0.3s;
+            }
+            input[type="file"]:hover {
+                border-color: #667eea;
+                background: #edf2f7;
+            }
+            .btn {
+                width: 100%;
+                padding: 14px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                margin-top: 20px;
+                transition: transform 0.2s, box-shadow 0.2s;
+            }
+            .btn:hover:not(:disabled) {
+                transform: translateY(-2px);
+                box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+            }
+            .btn:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+            }
+            .message {
+                padding: 15px;
+                border-radius: 8px;
+                margin-top: 20px;
+                display: none;
+            }
+            .message.success {
+                background: #c6f6d5;
+                color: #2f855a;
+                border: 1px solid #9ae6b4;
+            }
+            .message.error {
+                background: #fed7d7;
+                color: #c53030;
+                border: 1px solid #fc8181;
+            }
+            .message.info {
+                background: #bee3f8;
+                color: #2c5282;
+                border: 1px solid #90cdf4;
+            }
+            .spinner {
+                display: inline-block;
+                width: 16px;
+                height: 16px;
+                border: 2px solid rgba(255,255,255,0.3);
+                border-radius: 50%;
+                border-top-color: white;
+                animation: spin 0.6s linear infinite;
+                margin-right: 8px;
+            }
+            @keyframes spin {
+                to { transform: rotate(360deg); }
+            }
+            .stats {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 15px;
+                margin-top: 15px;
+            }
+            .stat {
+                background: #f7fafc;
+                padding: 15px;
+                border-radius: 8px;
+                text-align: center;
+            }
+            .stat-value {
+                font-size: 24px;
+                font-weight: bold;
+                color: #667eea;
+            }
+            .stat-label {
+                font-size: 12px;
+                color: #718096;
+                margin-top: 5px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🎓 Train Model</h1>
+            <p class="subtitle">Upload your CSV files to train the tag suggestion model</p>
+            
+            <form id="uploadForm">
+                <div class="file-upload">
+                    <label for="lectures">📚 Lectures CSV</label>
+                    <input type="file" id="lectures" name="lectures" accept=".csv" required>
+                </div>
+                
+                <div class="file-upload">
+                    <label for="labels">🏷️ Labels CSV</label>
+                    <input type="file" id="labels" name="labels" accept=".csv" required>
+                </div>
+                
+                <div class="file-upload">
+                    <label for="lecture_labels">🔗 Lecture-Labels CSV (Junction Table)</label>
+                    <input type="file" id="lecture_labels" name="lecture_labels" accept=".csv" required>
+                </div>
+                
+                <button type="submit" class="btn" id="submitBtn">
+                    Train Model
+                </button>
+            </form>
+            
+            <div id="message" class="message"></div>
+        </div>
+        
+        <script>
+            const form = document.getElementById('uploadForm');
+            const submitBtn = document.getElementById('submitBtn');
+            const message = document.getElementById('message');
+            
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<span class="spinner"></span>Training...';
+                message.style.display = 'none';
+                
+                const formData = new FormData();
+                formData.append('lectures', document.getElementById('lectures').files[0]);
+                formData.append('labels', document.getElementById('labels').files[0]);
+                formData.append('lecture_labels', document.getElementById('lecture_labels').files[0]);
+                
+                try {
+                    const response = await fetch('/train-csv', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok) {
+                        message.className = 'message success';
+                        message.style.display = 'block';
+                        message.innerHTML = `
+                            <strong>✅ Training Complete!</strong>
+                            <div class="stats">
+                                <div class="stat">
+                                    <div class="stat-value">${result.num_lectures || 0}</div>
+                                    <div class="stat-label">Lectures Processed</div>
+                                </div>
+                                <div class="stat">
+                                    <div class="stat-value">${result.num_prototypes || 0}</div>
+                                    <div class="stat-label">Prototypes Created</div>
+                                </div>
+                                <div class="stat">
+                                    <div class="stat-value">${result.num_tags || 0}</div>
+                                    <div class="stat-label">Tags</div>
+                                </div>
+                                <div class="stat">
+                                    <div class="stat-value">${result.low_data_tags || 0}</div>
+                                    <div class="stat-label">Low-Data Tags</div>
+                                </div>
+                            </div>
+                        `;
+                        form.reset();
+                    } else {
+                        throw new Error(result.error || 'Training failed');
+                    }
+                } catch (error) {
+                    message.className = 'message error';
+                    message.style.display = 'block';
+                    message.innerHTML = `<strong>❌ Error:</strong> ${error.message}`;
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = 'Train Model';
+                }
+            });
+        </script>
+    </body>
+    </html>
+    """
+    return html
 
 
 @app.route('/', methods=['GET'])

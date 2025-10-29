@@ -123,6 +123,41 @@ Train prototypes from training data and save to KV store.
 }
 ```
 
+### POST /train-csv
+Train prototypes from uploaded CSV files (alternative to JSON training).
+
+**Request:**
+Upload 3 CSV files as multipart/form-data:
+- `lectures`: CSV with columns `airtable_id`, `title`, `description`, `lecturer_id`
+- `labels`: CSV with columns `airtable_id`, `name`, `category`
+- `lecture_labels`: CSV with columns `lecture_id`, `label_id` (junction table)
+
+**Example CSV files:**
+
+lectures.csv:
+```csv
+airtable_id,title,description,lecturer_id
+lec_001,תלמוד בבלי,עיון במסכת ברכות,rec_lec1
+```
+
+labels.csv:
+```csv
+airtable_id,name,category
+tag_talmud,תלמוד,נושא
+```
+
+lecture_labels.csv:
+```csv
+lecture_id,label_id
+lec_001,tag_talmud
+```
+
+**Response:**
+Same as POST /train
+
+### GET /train-ui
+Web interface for CSV upload and training. Provides a user-friendly form to upload the 3 CSV files and train the model with real-time progress tracking.
+
 ### POST /suggest-tags
 Get tag suggestions for lectures based on pre-trained prototypes.
 
@@ -305,12 +340,20 @@ src/
   ├── reasoning_scorer.py # LLM-based reasoning scorer
   ├── llm_arbiter.py    # LLM refinement logic
   ├── lecturer_search.py # Lecturer bio search with DB caching
+  ├── csv_parser.py     # CSV file parser for training uploads
   └── shortlist.py      # Candidate shortlist optimizer
 ```
 
-## Recent Changes (2025-10-27)
+## Recent Changes
 
-### API Transformation
+### 2025-10-29: CSV Upload Feature
+- **Added CSV training interface** at `/train-ui` for easy model training
+- **New endpoint** `POST /train-csv` accepts 3 CSV files (lectures, labels, junction table)
+- **CSV parser** (`src/csv_parser.py`) handles data transformation from CSV to training format
+- **Web UI** with beautiful gradient design, file upload, progress tracking, and training stats
+- **Benefits**: Upload CSVs directly from Airtable/database exports, no manual JSON formatting needed
+
+### 2025-10-27: API Transformation
 - **Removed all database dependencies** (PostgreSQL, psycopg2)
 - **Stateless design**: All data via API payloads
 - **Replit KV Store**: Prototypes stored in key-value store
