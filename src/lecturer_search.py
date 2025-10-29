@@ -26,13 +26,15 @@ class LecturerSearchService:
             api_key: OpenAI API key (defaults to env var)
         """
         self.client = OpenAI(api_key=api_key)
-        self.model = "gpt-4o-mini"
+        self.search_model = "gpt-4o"  # Better accuracy for bio search
+        self.validation_model = "gpt-4o-mini"  # Fast validation
         self.database_url = os.getenv('DATABASE_URL')
         
     def get_lecturer_profile(
         self, 
         lecturer_id: Optional[str] = None,
-        lecturer_name: Optional[str] = None
+        lecturer_name: Optional[str] = None,
+        lecture_description: Optional[str] = None
     ) -> Optional[str]:
         """
         Get lecturer bio, checking database cache first.
@@ -40,9 +42,10 @@ class LecturerSearchService:
         Args:
             lecturer_id: Unique lecturer identifier (preferred)
             lecturer_name: Lecturer name (fallback)
+            lecture_description: Lecture content to validate bio against
             
         Returns:
-            Bio text or None if not found
+            Bio text or None if not found or validation failed
         """
         if not lecturer_id and not lecturer_name:
             logger.warning("No lecturer_id or lecturer_name provided")
@@ -61,6 +64,13 @@ class LecturerSearchService:
             
         logger.info(f"Searching for bio: {lecturer_name}")
         bio = self._search_with_llm(lecturer_name)
+        
+        # Validate bio against lecture description if both available
+        if bio and lecture_description:
+            is_valid = self._validate_bio_with_lecture(bio, lecturer_name, lecture_description)
+            if not is_valid:
+                logger.warning(f"Bio validation failed for {lecturer_name} - not caching")
+                return None  # Don't use or cache incorrect bio
         
         # Save to cache (even if None - to avoid repeated searches)
         if lecturer_id:
@@ -138,7 +148,7 @@ class LecturerSearchService:
                     bio_text = EXCLUDED.bio_text,
                     searched_at = EXCLUDED.searched_at
                 """,
-                (lecturer_id, lecturer_name, bio_text, datetime.now(), f'gpt-search:{self.model}')
+                (lecturer_id, lecturer_name, bio_text, datetime.now(), f'gpt-search:{self.search_model}')
             )
             
             conn.commit()
@@ -162,7 +172,7 @@ class LecturerSearchService:
         """
         try:
             response = self.client.chat.completions.create(
-                model=self.model,
+                model=self.search_model,
                 messages=[
                     {
                         "role": "system",
@@ -197,3 +207,60 @@ Write in Hebrew. If the person is well-known, provide relevant details. Make a r
         except Exception as e:
             logger.error(f"Error searching with LLM: {e}")
             return None
+    
+    def _validate_bio_with_lecture(
+        self,
+        bio: str,
+        lecturer_name: str,
+        lecture_description: str
+    ) -> bool:
+        """
+        Validate that the bio makes sense with the lecture description.
+        
+        Prevents caching incorrect bios (e.g., wrong person with same name).
+        
+        Args:
+            bio: The lecturer bio to validate
+            lecturer_name: Lecturer name
+            lecture_description: Lecture content
+            
+        Returns:
+            True if bio seems consistent with lecture, False otherwise
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.validation_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """You are validating if a lecturer bio matches a lecture description.
+
+Check if the bio's expertise/field is consistent with the lecture topic. 
+If there's a clear mismatch (e.g., bio says "tech entrepreneur" but lecture is about sports/judo), return FALSE.
+If bio could reasonably match or is neutral, return TRUE.
+
+Respond ONLY with TRUE or FALSE."""
+                    },
+                    {
+                        "role": "user",
+                        "content": f"""Bio: {bio}
+
+Lecture: {lecture_description}
+
+Does this bio make sense for someone giving this lecture?"""
+                    }
+                ],
+                temperature=0,
+                max_tokens=10
+            )
+            
+            result = response.choices[0].message.content.strip().upper()
+            is_valid = "TRUE" in result
+            
+            logger.info(f"Bio validation for {lecturer_name}: {result} -> {is_valid}")
+            return is_valid
+            
+        except Exception as e:
+            logger.error(f"Error validating bio: {e}")
+            # On error, assume valid (don't block valid bios due to validation failure)
+            return True

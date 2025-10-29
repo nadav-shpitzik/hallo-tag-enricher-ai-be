@@ -253,21 +253,27 @@ Configured in `src/config.py`:
 
 When you provide `lecturer_id` and/or `lecturer_name` in your request, the reasoning mode automatically:
 
-1. **Searches for lecturer bio** using GPT-4o-mini
-   - First-time lookup: ~1-2 seconds, ~$0.001
+1. **Searches for lecturer bio** using GPT-4o
+   - First-time lookup: ~2-3 seconds, ~$0.005
    - Searches for professional background, expertise, teaching style
+   - High accuracy with GPT-4
    
-2. **Caches in PostgreSQL database**
+2. **Validates bio against lecture** using GPT-4o-mini
+   - Checks if bio makes sense with lecture description
+   - Prevents caching incorrect/mismatched bios
+   - Only caches validated bios
+   
+3. **Caches in PostgreSQL database**
    - Instant retrieval on subsequent requests
    - Persists across server restarts
    - Table: `lecturer_bios`
    
-3. **Enriches LLM prompt**
+4. **Enriches LLM prompt**
    - Adds lecturer expertise context
    - Improves label accuracy
    - Better understanding of lecture content
 
-**Cost**: One-time ~$0.001 per unique lecturer, then free (cached)
+**Cost**: One-time ~$0.006 per unique lecturer (search + validation), then free (cached)
 
 **Example Request:**
 ```json

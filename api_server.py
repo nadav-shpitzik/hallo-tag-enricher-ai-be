@@ -460,13 +460,15 @@ def score_lecture_with_reasoning(lecture: Dict, labels: List[Dict]) -> List[Dict
     lecturer_profile = None
     lecturer_id = lecture.get('lecturer_id')
     lecturer_name = lecture.get('lecturer_name')
+    lecture_description = lecture.get('description', '')
     
     if lecturer_id or lecturer_name:
         try:
             search_service = LecturerSearchService(api_key=config.openai_api_key)
             lecturer_profile = search_service.get_lecturer_profile(
                 lecturer_id=lecturer_id,
-                lecturer_name=lecturer_name
+                lecturer_name=lecturer_name,
+                lecture_description=lecture_description
             )
             if lecturer_profile:
                 logger.info(f"Enriching reasoning with lecturer bio: {lecturer_name or lecturer_id}")
