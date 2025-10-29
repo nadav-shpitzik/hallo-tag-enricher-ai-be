@@ -122,9 +122,10 @@ def validate_training_data(lectures: List[Dict], tags_data: Dict) -> Dict[str, a
         category_counts[category] = category_counts.get(category, 0) + 1
         tag_example_counts[tag_id] = 0
     
-    # Count examples per tag
+    # Count examples per tag (handle both v1 and v2 formats)
     for lecture in lectures:
-        for tag_id in lecture.get('lecture_tag_ids', []) + lecture.get('label_ids', []):
+        tag_ids = lecture.get('lecture_tag_ids') or lecture.get('label_ids', [])
+        for tag_id in tag_ids:
             if tag_id in tag_example_counts:
                 tag_example_counts[tag_id] += 1
     
@@ -486,13 +487,14 @@ def train():
             lectures = training_data.get('lectures', [])
             labels = training_data.get('labels', [])
             
-            # Convert labels array to tags dict
+            # Convert labels array to tags dict (preserve category)
             tags = {}
             for label in labels:
                 tags[label['id']] = {
                     'tag_id': label['id'],
                     'name_he': label.get('name_he', ''),
-                    'synonyms_he': label.get('synonyms_he', '')
+                    'synonyms_he': label.get('synonyms_he', ''),
+                    'category': label.get('category', 'Unknown')
                 }
             
             # Convert lectures to old format
