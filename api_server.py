@@ -563,56 +563,58 @@ def index():
         <div class="endpoint">
             <span class="method post">POST</span>
             <span class="path">/suggest-tags</span>
-            <p class="description">Get tag suggestions for new lectures based on pre-trained prototypes.</p>
+            <p class="description">Get tag suggestions for a single lecture based on pre-trained prototypes.</p>
             
-            <h3>Request Example:</h3>
+            <h3>Request Example (v2):</h3>
             <pre>{
-  "lectures": [
-    {
-      "id": "test_001",
-      "lecture_title": "שיעור על הלכה",
-      "lecture_description": "דיני שבת והלכות יומיות"
-    },
-    {
-      "id": "test_002",
-      "lecture_title": "פילוסופיה יהודית",
-      "lecture_description": "מחשבת הרמב״ם והרמב״ן"
-    }
-  ],
-  "tags": {
-    "halakha": {
-      "tag_id": "halakha",
-      "name_he": "הלכה",
-      "synonyms_he": "דינים משפט עברי"
-    },
-    "philosophy": {
-      "tag_id": "philosophy",
-      "name_he": "פילוסופיה",
-      "synonyms_he": "מחשבה השקפה"
-    }
-  }
+  "request_id": "c5f6f5f2-6c36-4b6f-9d6f-1d0b02b24a11",
+  "model_version": "v1",
+  "artifact_version": "labels-emb-2025-10-29",
+  "lecture": {
+    "id": "rec17SffStTL231k8",
+    "title": "על חרדה והתמודדות",
+    "description": "אסי עזר ומיכל עזר סטיין הם אחים... כלים יומיומיים להתמודדות.",
+    "lecturer_id": "recasCfleyvOlrhkf",
+    "lecturer_name": "אסי עזר ומיכל עזר סטיין",
+    "lecturer_role": "אסי עזר, יוצר ומנחה; מיכל עזר סטיין, מאמנת אישית",
+    "language": "he",
+    "related_lectures": [
+      { "id": "recR59LwPxi07sk6g", "title": "לחיות עם חרדה", "labels": ["lab_persona_celebs"] }
+    ]
+  },
+  "labels": [
+    { "id": "lab_persona_celebs", "name_he": "סלבס", "category": "Persona", "active": true },
+    { "id": "lab_topic_mental_health", "name_he": "בריאות הנפש", "category": "Topic", "active": true },
+    { "id": "lab_tone_personal", "name_he": "אישי", "category": "Tone", "active": true },
+    { "id": "lab_format_talk", "name_he": "הרצאה", "category": "Format", "active": true }
+  ]
 }</pre>
             
             <h3>Response Example:</h3>
             <pre>{
+  "request_id": "c5f6f5f2-6c36-4b6f-9d6f-1d0b02b24a11",
+  "model_version": "v1",
+  "artifact_version": "labels-emb-2025-10-29",
   "suggestions": [
     {
-      "lecture_id": "test_001",
-      "tag_id": "halakha",
-      "tag_name_he": "הלכה",
-      "score": 0.872,
-      "rationale": "Prototype similarity score: 0.872"
+      "label_id": "lab_topic_mental_health",
+      "category": "Topic",
+      "confidence": 0.91,
+      "reasons": ["desc_match"]
     },
     {
-      "lecture_id": "test_002",
-      "tag_id": "philosophy",
-      "tag_name_he": "פילוסופיה",
-      "score": 0.815,
-      "rationale": "Prototype similarity score: 0.815"
+      "label_id": "lab_persona_celebs",
+      "category": "Persona",
+      "confidence": 0.84,
+      "reasons": ["desc_match"]
+    },
+    {
+      "label_id": "lab_tone_personal",
+      "category": "Tone",
+      "confidence": 0.67,
+      "reasons": ["title_match"]
     }
-  ],
-  "num_lectures": 2,
-  "num_suggestions": 2
+  ]
 }</pre>
         </div>
 
@@ -660,21 +662,33 @@ def index():
             <pre>curl http://localhost:5000/health</pre>
         </div>
 
-        <h2>📊 Data Requirements</h2>
+        <h2>📊 Data Requirements (v2 Format)</h2>
         <div class="endpoint">
             <h3>Lecture Object</h3>
             <ul>
-                <li><code>id</code> (string): Unique lecture identifier</li>
-                <li><code>lecture_title</code> (string): Hebrew lecture title</li>
-                <li><code>lecture_description</code> (string): Hebrew lecture description</li>
-                <li><code>lecture_tag_ids</code> (array, training only): Existing tag IDs for this lecture</li>
+                <li><code>id</code> (string, required): Unique lecture identifier (e.g., "rec17SffStTL231k8")</li>
+                <li><code>title</code> (string, required): Hebrew lecture title</li>
+                <li><code>description</code> (string, required): Hebrew lecture description</li>
+                <li><code>lecturer_id</code> (string, optional): Lecturer identifier</li>
+                <li><code>lecturer_name</code> (string, optional): Lecturer name</li>
+                <li><code>lecturer_role</code> (string, optional): Lecturer role or bio</li>
+                <li><code>language</code> (string, optional): Language code (e.g., "he")</li>
+                <li><code>related_lectures</code> (array, optional): Related lecture references</li>
             </ul>
 
-            <h3>Tag Object</h3>
+            <h3>Label Object</h3>
             <ul>
-                <li><code>tag_id</code> (string): Unique tag identifier</li>
-                <li><code>name_he</code> (string): Hebrew tag name</li>
-                <li><code>synonyms_he</code> (string): Hebrew synonyms (space-separated)</li>
+                <li><code>id</code> (string, required): Unique label identifier (e.g., "lab_topic_mental_health")</li>
+                <li><code>name_he</code> (string, required): Hebrew label name</li>
+                <li><code>category</code> (string, required): Label category (Topic, Persona, Tone, Format, Audience, etc.)</li>
+                <li><code>active</code> (boolean, optional): Whether label is active (default: true)</li>
+            </ul>
+
+            <h3>Request Metadata</h3>
+            <ul>
+                <li><code>request_id</code> (string, optional): UUID for request tracking</li>
+                <li><code>model_version</code> (string, optional): Model version (default: "v1")</li>
+                <li><code>artifact_version</code> (string, optional): Training artifact version (e.g., "labels-emb-2025-10-29")</li>
             </ul>
         </div>
 
