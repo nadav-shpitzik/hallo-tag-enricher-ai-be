@@ -22,6 +22,7 @@ from src.prototype_knn import PrototypeKNN
 from src.config import Config
 from src.llm_arbiter import LLMArbiter
 from src.reasoning_scorer import ReasoningScorer
+from src.lecturer_search import LecturerSearchService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -441,6 +442,8 @@ def score_lecture_with_reasoning(lecture: Dict, labels: List[Dict]) -> List[Dict
     Uses structured output to generate intelligent suggestions with Hebrew rationales.
     Highest quality but slowest and most expensive.
     
+    Automatically fetches lecturer bio if lecturer_id or lecturer_name provided.
+    
     Args:
         lecture: Lecture dict
         labels: List of label dicts
@@ -453,12 +456,29 @@ def score_lecture_with_reasoning(lecture: Dict, labels: List[Dict]) -> List[Dict
         min_confidence=config.min_confidence_threshold
     )
     
+    # Fetch lecturer bio if available
+    lecturer_profile = None
+    lecturer_id = lecture.get('lecturer_id')
+    lecturer_name = lecture.get('lecturer_name')
+    
+    if lecturer_id or lecturer_name:
+        try:
+            search_service = LecturerSearchService(api_key=config.openai_api_key)
+            lecturer_profile = search_service.get_lecturer_profile(
+                lecturer_id=lecturer_id,
+                lecturer_name=lecturer_name
+            )
+            if lecturer_profile:
+                logger.info(f"Enriching reasoning with lecturer bio: {lecturer_name or lecturer_id}")
+        except Exception as e:
+            logger.warning(f"Failed to fetch lecturer bio: {e}")
+    
     # Convert lecture to format expected by reasoning scorer
     lecture_for_scorer = {
         'id': lecture.get('id'),
         'lecture_title': lecture.get('title', ''),
         'lecture_description': lecture.get('description', ''),
-        'lecturer_name': lecture.get('lecturer_name', '')
+        'lecturer_name': lecturer_name or ''
     }
     
     # Convert labels to format expected by scorer
@@ -473,10 +493,11 @@ def score_lecture_with_reasoning(lecture: Dict, labels: List[Dict]) -> List[Dict
             'category': label.get('category', 'Unknown')
         })
     
-    # Call reasoning scorer
+    # Call reasoning scorer with lecturer profile
     llm_suggestions = scorer.score_lecture(
         lecture=lecture_for_scorer,
-        all_tags=labels_for_scorer
+        all_tags=labels_for_scorer,
+        lecturer_profile=lecturer_profile
     )
     
     # Convert to v2 format
