@@ -1,428 +1,53 @@
 # Tag Suggestions API
 
 ## Overview
-A stateless REST API for suggesting tags to Hebrew lectures using AI-powered semantic analysis. The system uses OpenAI embeddings and prototype learning to provide intelligent tag suggestions.
+A stateless REST API for suggesting tags to Hebrew lectures using AI-powered semantic analysis. The system leverages OpenAI embeddings and prototype learning to provide intelligent, high-precision tag suggestions. The project aims to deliver a fast, scalable, and cost-effective solution for automated content tagging, with a focus on accuracy and explainability for Hebrew content.
 
-## Project Type
-**REST API with PostgreSQL Storage**
-- Stateless request handling  
-- All lecture/label data provided via API payloads
-- Pre-computed prototypes stored in PostgreSQL with versioning
-- Fast, scalable tag suggestion endpoint
-- Database used for: prototypes storage, lecturer bios cache
+## User Preferences
+Not specified.
 
-## Architecture
+## System Architecture
 
-### Core Components
-1. **Training Endpoint** (`POST /train`)
-   - Accepts training lectures with existing tags as JSON
-   - Generates embeddings using OpenAI text-embedding-3-large
-   - Computes tag prototypes (centroids) from training data
-   - Calibrates per-tag confidence thresholds
-   - Saves prototypes to PostgreSQL with versioning
-
-2. **Suggestion Endpoint** (`POST /suggest-tags`)
-   - Accepts new lectures to tag as JSON
-   - Loads pre-computed prototypes from PostgreSQL (cached in memory)
-   - Generates embeddings for input lectures
-   - Scores against prototypes using cosine similarity
-   - Returns tag suggestions with confidence scores
-
-3. **Reload Endpoint** (`POST /reload-prototypes`)
-   - Reloads prototypes from PostgreSQL without restart
-   - Useful after retraining prototypes
-
-4. **Visibility Endpoints** (NEW)
-   - `GET /prototype-versions`: List all prototype versions with metadata
-   - `GET /tag-info/<tag_id>`: Get detailed info about a specific tag (threshold, examples, vector dimension)
-
-### Data Flow
-```
-Training Flow:
-1. Client sends training lectures + tags via POST /train (or CSV via POST /train-csv)
-2. API generates embeddings for lectures and tags
-3. API builds prototypes (centroids per tag)
-4. API calibrates thresholds for precision
-5. API saves prototypes to PostgreSQL with version tracking
-6. Returns training summary
-
-Suggestion Flow:
-1. Client sends lectures + tags via POST /suggest-tags
-2. API loads prototypes from PostgreSQL (cached in memory)
-3. API generates embeddings for input lectures
-4. API scores lectures using selected scoring mode:
-   - ENSEMBLE: Reasoning (80%) + Prototype (20%) with agreement bonus (~5-7s, ~3-4s cached) ✓ NEW DEFAULT
-   - FAST: Prototype similarity only (~1s)
-   - FULL_QUALITY: Prototype + LLM arbiter for borderline (~2-3s)
-   - REASONING: Pure LLM analysis with Hebrew rationales (~5-7s, ~3-4s cached)
-5. Returns suggestions above threshold with scores
-```
+### Core Functionality
+The system provides endpoints for:
+- **Training**: Accepts training lectures with existing tags (JSON or CSV) to generate embeddings, compute tag prototypes (centroids), calibrate confidence thresholds, and save prototypes to PostgreSQL with versioning.
+- **Suggestion**: Provides tag suggestions for new lectures by loading pre-computed prototypes, generating embeddings for input lectures, and scoring against prototypes using cosine similarity.
+- **Management**: Endpoints for reloading prototypes and viewing prototype versions and tag information.
 
 ### Scoring Modes
+The API supports four scoring modes, balancing quality, speed, and cost:
+1.  **Ensemble Mode (`"ensemble"`)**: (NEW DEFAULT) Combines reasoning model (80%) and prototype model (20%) with an agreement bonus for highest accuracy. Includes lecturer bio auto-enrichment.
+2.  **Fast Mode (`"fast"`)**: Uses only prototype similarity for the fastest and cheapest suggestions.
+3.  **Full Quality Mode (`"full_quality"`)**: Uses prototype scoring with an LLM arbiter for borderline cases, balancing speed and quality.
+4.  **Reasoning Mode (`"reasoning"`)**: Pure GPT-4o-mini analysis providing high-quality suggestions with detailed Hebrew rationales and lecturer bio auto-enrichment.
 
-The API supports four scoring modes that balance quality, speed, and cost:
+### Data Flow
+-   **Training Flow**: Client sends training data, API generates embeddings, builds prototypes, calibrates thresholds, and saves versioned prototypes to PostgreSQL.
+-   **Suggestion Flow**: Client sends lectures, API loads/caches prototypes, generates embeddings, scores lectures using the selected scoring mode, and returns suggestions.
 
-**1. Ensemble Mode (`"ensemble"`)** ✓ **NEW DEFAULT - Best Accuracy**
-- Combines reasoning model (80%) + prototype model (20%)
-- When both models agree on a tag, applies +15% confidence bonus
-- Best accuracy, especially as training data grows
-- Similar speed to reasoning (~5-7 seconds per lecture, ~3-4s if lecturer bio cached)
-- Similar cost to reasoning (~$0.002-0.005 per lecture)
-- Provides detailed Hebrew rationales from reasoning model
-- **Auto-enrichment**: Searches for lecturer bio using GPT-4o if `lecturer_id` or `lecturer_name` provided
-- Best for: Highest accuracy needs, production tagging with growing training data
+### UI/UX Decisions
+-   A web interface (`/train-ui`) is provided for user-friendly CSV upload and model training, featuring a gradient design and real-time progress tracking.
 
-**2. Fast Mode (`"fast"`)**
-- Uses only prototype similarity matching
-- Fastest option (~1 second per lecture)
-- Cheapest (~$0.0002 per lecture)
-- Good baseline quality
-- Best for: Batch processing, quick previews
+### Technical Implementations
+-   **Stateless Design**: All lecture/label data is provided via API payloads.
+-   **PostgreSQL Storage**: Prototypes are stored in PostgreSQL, enabling versioning and visibility.
+-   **In-memory Caching**: Pre-computed prototypes are cached in memory for fast suggestion responses.
+-   **Lecturer Bio Enrichment**: In reasoning and ensemble modes, GPT-4o is used to search, validate, and cache lecturer bios in PostgreSQL (`lecturer_bios` table) to enrich LLM prompts and improve accuracy.
+-   **Structured Logging**: Uses structured JSON logging with `request_id` correlation, performance metrics, business metrics, and error context for observability.
+-   **LLM Cost Monitoring**: Tracks token usage and estimates costs for all OpenAI API calls.
+-   **Discord Notifications**: Configurable Discord webhooks for comprehensive request summaries, performance data, quality metrics, and error details.
 
-**3. Full Quality Mode (`"full_quality"`)**
-- Prototype scoring + LLM arbiter for borderline cases
-- Balanced speed (~2-3 seconds per lecture)
-- Moderate cost (~$0.001-0.003 per lecture)
-- LLM reviews uncertain suggestions (0.50-0.80 confidence)
-- Auto-approves high confidence (≥0.80)
-- Adds "llm_refined" reason to arbiter-approved suggestions
-- Best for: Fast production use when ensemble is too slow
+### Files Structure
+-   `api_server.py`: Main API server.
+-   `train_prototypes.py`: Standalone training script.
+-   `src/`: Contains core modules like `config.py`, `embeddings.py`, `prototype_knn.py`, `prototype_storage.py`, `scorer.py`, `reasoning_scorer.py`, `ensemble_scorer.py`, `llm_arbiter.py`, `lecturer_search.py`, `csv_parser.py`, and `shortlist.py`.
 
-**4. Reasoning Mode (`"reasoning"`)**
-- Pure GPT-4o-mini analysis of lecture content
-- High quality (~5-7 seconds per lecture, ~3-4s if lecturer bio cached)
-- Similar cost to ensemble (~$0.002-0.005 per lecture)
-- Generates detailed Hebrew rationales for each suggestion
-- Confidence scores calibrated (scaled by 0.85 to prevent over-confidence)
-- Adds "rationale_he" field with explanations
-- **Auto-enrichment**: Searches for lecturer bio using GPT-4o if `lecturer_id` or `lecturer_name` provided
-- Best for: When training data is very limited, or when pure LLM reasoning is preferred
-
-**How to Use:**
-Add `"scoring_mode": "ensemble"` to your /suggest-tags request, or set the `SCORING_MODE` environment variable to change the default.
-
-## API Endpoints
-
-### POST /train
-Train prototypes from training data and save to KV store.
-
-**Request:**
-```json
-{
-  "lectures": [
-    {
-      "id": "lec_001",
-      "lecture_title": "שיעור בתלמוד",
-      "lecture_description": "עיון במסכת ברכות",
-      "lecture_tag_ids": ["talmud", "gemara"]
-    }
-  ],
-  "tags": {
-    "talmud": {
-      "tag_id": "talmud",
-      "name_he": "תלמוד",
-      "synonyms_he": "גמרא תלמוד בבלי"
-    }
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "status": "success",
-  "num_prototypes": 12,
-  "num_lectures": 5,
-  "num_tags": 12,
-  "low_data_tags": 3
-}
-```
-
-### POST /train-csv
-Train prototypes from uploaded CSV files (alternative to JSON training).
-
-**Request:**
-Upload 3 CSV files as multipart/form-data:
-- `lectures`: CSV with columns `airtable_id`, `title`, `description`, `lecturer_id`
-- `labels`: CSV with columns `airtable_id`, `name`, `category`
-- `lecture_labels`: CSV with columns `lecture_id`, `label_id` (junction table)
-
-**Example CSV files:**
-
-lectures.csv:
-```csv
-airtable_id,title,description,lecturer_id
-lec_001,תלמוד בבלי,עיון במסכת ברכות,rec_lec1
-```
-
-labels.csv:
-```csv
-airtable_id,name,category
-tag_talmud,תלמוד,נושא
-```
-
-lecture_labels.csv:
-```csv
-lecture_id,label_id
-lec_001,tag_talmud
-```
-
-**Response:**
-Same as POST /train
-
-### GET /train-ui
-Web interface for CSV upload and training. Provides a user-friendly form to upload the 3 CSV files and train the model with real-time progress tracking.
-
-### POST /suggest-tags
-Get tag suggestions for lectures based on pre-trained prototypes.
-
-**Request:**
-```json
-{
-  "lectures": [
-    {
-      "id": "test_001",
-      "lecture_title": "קבלה ומיסטיקה",
-      "lecture_description": "סודות הזוהר והקבלה"
-    }
-  ],
-  "tags": {
-    "kabbalah": {
-      "tag_id": "kabbalah",
-      "name_he": "קבלה",
-      "synonyms_he": "סודות מיסטיקה"
-    }
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "suggestions": [
-    {
-      "lecture_id": "test_001",
-      "tag_id": "kabbalah",
-      "tag_name_he": "קבלה",
-      "score": 0.865,
-      "rationale": "Prototype similarity score: 0.865"
-    }
-  ],
-  "num_lectures": 1,
-  "num_suggestions": 1
-}
-```
-
-### POST /reload-prototypes
-Reload prototypes from KV store without restarting the server.
-
-**Response:**
-```json
-{
-  "status": "success",
-  "num_prototypes": 12
-}
-```
-
-### GET /health
-Health check endpoint.
-
-**Response:**
-```json
-{
-  "status": "ok",
-  "prototypes_loaded": true,
-  "num_prototypes": 12
-}
-```
-
-### GET /
-API information and available endpoints.
-
-## How to Use
-
-### 1. Initial Setup
-Set the `OPENAI_API_KEY` environment variable (required for embeddings):
-```bash
-export OPENAI_API_KEY=your-api-key-here
-```
-
-### 2. Start the API Server
-The API server runs automatically via the "API Server" workflow on port 5000.
-
-### 3. Train Prototypes
-Send your training data (lectures with existing tags) to train the model:
-
-```bash
-curl -X POST http://localhost:5000/train \
-  -H "Content-Type: application/json" \
-  -d @training_data.json
-```
-
-Training happens once or periodically when you have new training data. The prototypes are saved to Replit KV store and persist across server restarts.
-
-### 4. Get Tag Suggestions
-Send new lectures to get tag suggestions:
-
-```bash
-curl -X POST http://localhost:5000/suggest-tags \
-  -H "Content-Type: application/json" \
-  -d @request_data.json
-```
-
-## Testing
-
-Run the test script to verify the complete flow:
-
-```bash
-python test_api.py
-```
-
-This will:
-1. Check API health
-2. Train prototypes with sample data
-3. Get tag suggestions for test lectures
-4. Test the reload endpoint
-
-## Configuration
-
-### Environment Variables
-- `OPENAI_API_KEY` (required): Your OpenAI API key for embeddings
-- `PORT` (optional): API server port (default: 5000)
-
-### Model Settings
-Configured in `src/config.py`:
-- **Embedding Model**: `text-embedding-3-large` (3072 dimensions)
-- **Target Precision**: 0.90 (high precision for tag suggestions)
-- **Min Confidence**: 0.60 (threshold for suggestions)
-- **Prototype Weight**: 0.8 (vs label weight 0.2 for low-data tags)
-
-## Lecturer Bio Enrichment
-
-**Available in Reasoning Mode only**
-
-When you provide `lecturer_id` and/or `lecturer_name` in your request, the reasoning mode automatically:
-
-1. **Searches for lecturer bio** using GPT-4o
-   - First-time lookup: ~2-3 seconds, ~$0.005
-   - Searches for professional background, expertise, teaching style
-   - High accuracy with GPT-4
-   
-2. **Validates bio against lecture** using GPT-4o-mini
-   - Checks if bio makes sense with lecture description
-   - Prevents caching incorrect/mismatched bios
-   - Only caches validated bios
-   
-3. **Caches in PostgreSQL database**
-   - Instant retrieval on subsequent requests
-   - Persists across server restarts
-   - Table: `lecturer_bios`
-   
-4. **Enriches LLM prompt**
-   - Adds lecturer expertise context
-   - Improves label accuracy
-   - Better understanding of lecture content
-
-**Cost**: One-time ~$0.006 per unique lecturer (search + validation), then free (cached)
-
-**Example Request:**
-```json
-{
-  "scoring_mode": "reasoning",
-  "lecture": {
-    "id": "rec123",
-    "title": "קבלה ומיסטיקה",
-    "description": "...",
-    "lecturer_id": "recXYZ789",
-    "lecturer_name": "הרב משה כהן"
-  },
-  "labels": [...]
-}
-```
-
-## Files Structure
-
-```
-api_server.py           # Main API server with all endpoints
-train_prototypes.py     # Standalone training script (CLI/API mode)
-test_api.py             # Test script for API validation
-
-src/
-  ├── config.py         # Configuration settings
-  ├── embeddings.py     # OpenAI embeddings generation
-  ├── prototype_knn.py  # Prototype learning and scoring
-  ├── prototype_storage.py # PostgreSQL storage for prototypes with versioning
-  ├── scorer.py         # Multi-mode scoring engine
-  ├── reasoning_scorer.py # LLM-based reasoning scorer
-  ├── ensemble_scorer.py # Ensemble scorer (reasoning + prototype)
-  ├── llm_arbiter.py    # LLM refinement logic
-  ├── lecturer_search.py # Lecturer bio search with DB caching
-  ├── csv_parser.py     # CSV file parser for training uploads
-  └── shortlist.py      # Candidate shortlist optimizer
-```
-
-## Recent Changes
-
-### 2025-10-29 (Latest): Ensemble Scoring Mode ✓ NEW DEFAULT
-- **New ensemble mode** combines reasoning (80%) + prototype (20%) scores
-- **Agreement bonus**: +15% when both models suggest the same tag
-- **Best accuracy**: Especially effective as training data grows
-- **Configuration**: Weights configurable via environment variables
-- **Auto-enrichment**: Inherits lecturer bio search from reasoning mode
-- **Benefits**: Higher accuracy than single models, balanced cost/performance
-
-### 2025-10-29: CSV Upload Feature
-- **Added CSV training interface** at `/train-ui` for easy model training
-- **New endpoint** `POST /train-csv` accepts 3 CSV files (lectures, labels, junction table)
-- **CSV parser** (`src/csv_parser.py`) handles data transformation from CSV to training format
-- **Web UI** with beautiful gradient design, file upload, progress tracking, and training stats
-- **Benefits**: Upload CSVs directly from Airtable/database exports, no manual JSON formatting needed
-
-### 2025-10-29 (Later): PostgreSQL Prototype Storage
-- **Migrated from KV to PostgreSQL** for better visibility and learning
-- **Versioning system**: Track prototype changes over time
-- **New tables**: `prototype_versions`, `tag_prototypes`, `tag_embeddings`
-- **New endpoints**: `/prototype-versions`, `/tag-info/<tag_id>` for data visibility
-- **Benefits**: SQL queryable, versioned history, easier debugging
-
-### 2025-10-27: API Transformation  
-- **Stateless design**: All lecture/label data via API payloads (no longer loaded from database)
-- **Combined endpoints**: Training and suggestions in one API
-- **Removed components**: Web viewer, Airtable sync, batch processing
-- **Kept core AI logic**: Embeddings, prototypes, scoring, LLM arbiter
-
-### Benefits
-- ✓ **Visible**: Query prototypes directly with SQL
-- ✓ **Versioned**: Track how prototypes evolve over time
-- ✓ **Stateless requests**: Each suggestion request is independent
-- ✓ **Fast**: Pre-computed prototypes cached in memory
-- ✓ **Scalable**: Train once, serve many
-- ✓ **Learnable**: Inspect thresholds, embeddings, training stats
-
-## Dependencies
-- `openai` - Embeddings and LLM
-- `flask` - REST API framework
-- `numpy` - Vector operations
-- `scikit-learn` - Similarity computations
-- `pandas` - Data processing
-- `python-dotenv` - Environment config
-- `replit` - KV store integration
-
-## Cost Estimates
-
-### Training (one-time or periodic)
-- For 100 training lectures: ~$0.02 in embeddings
-- For 50 tags: ~$0.001 in embeddings
-- **Total**: ~$0.02 per training run
-
-### Suggestions (per request)
-- For 10 lectures: ~$0.002 in embeddings
-- **Total**: ~$0.0002 per lecture
-
-Training is infrequent (only when you have new training data), while suggestions are fast and cheap.
-
-## Security Notes
-- API key stored in environment variable
-- No data persistence (except prototypes in KV store)
-- No authentication (add as needed for production)
-- CORS disabled (enable if needed for web clients)
+## External Dependencies
+-   **OpenAI**: Used for `text-embedding-3-large` embeddings and GPT-4o/GPT-4o-mini for LLM-based reasoning, arbitration, and lecturer bio enrichment.
+-   **PostgreSQL**: Database for storing versioned prototypes and cached lecturer bios.
+-   **Flask**: Python web framework for building the REST API.
+-   **NumPy**: For numerical operations, particularly vector manipulation.
+-   **Scikit-learn**: For similarity computations.
+-   **Pandas**: For data processing, especially for CSV input.
+-   **Python-dotenv**: For managing environment variables.
+-   **Discord Webhooks**: Optional integration for sending API notifications.
