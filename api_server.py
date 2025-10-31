@@ -13,6 +13,7 @@ Endpoints:
 import os
 import json
 import logging
+import time
 import numpy as np
 from typing import List, Dict, Optional
 from flask import Flask, request, jsonify, g
@@ -28,6 +29,7 @@ from src.prototype_storage import PrototypeStorage
 from src.ensemble_scorer import EnsembleScorer
 from src.logging_utils import StructuredLogger, track_operation, sanitize_for_logging
 from src.request_logging import log_request_middleware, log_api_call_details, log_scoring_metrics
+from src.discord_notifier import DiscordNotifier
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,6 +41,14 @@ app = Flask(__name__)
 
 # Setup request logging middleware
 log_request_middleware(app)
+
+# Initialize Discord notifier (requires DISCORD_WEBHOOK_URL environment variable)
+DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL', '')
+if DISCORD_WEBHOOK_URL:
+    discord_notifier = DiscordNotifier(DISCORD_WEBHOOK_URL)
+else:
+    logger.warning("DISCORD_WEBHOOK_URL environment variable not set - Discord notifications disabled")
+    discord_notifier = DiscordNotifier('')  # Disabled notifier
 
 # Global state
 prototypes_loaded = False
@@ -725,14 +735,27 @@ def suggest_tags():
         ]
     }
     """
+    data = None
+    lecture = None
     try:
         data = request.get_json()
         
         if not data:
             logger.warning("No JSON data provided in suggest-tags request")
+            discord_notifier.send_request_summary(
+                request_id='unknown',
+                endpoint="/suggest-tags",
+                status="error",
+                duration_ms=0,
+                details={
+                    'error_message': 'No JSON data provided',
+                    'error_type': 'ValidationError',
+                    'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+                }
+            )
             return jsonify({'error': 'No JSON data provided'}), 400
         
-        request_id = data.get('request_id')
+        request_id = data.get('request_id', 'unknown')
         model_version = data.get('model_version', 'v1')
         artifact_version = data.get('artifact_version', 'unknown')
         scoring_mode = data.get('scoring_mode')  # Optional override
@@ -753,17 +776,47 @@ def suggest_tags():
         
         if not lecture:
             logger.warning("No lecture provided", request_id=request_id)
+            discord_notifier.send_request_summary(
+                request_id=request_id,
+                endpoint="/suggest-tags",
+                status="error",
+                duration_ms=0,
+                details={
+                    'error_message': 'No lecture provided',
+                    'error_type': 'ValidationError',
+                    'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+                }
+            )
             return jsonify({'error': 'No lecture provided'}), 400
         
         if not labels:
             logger.warning("No labels provided", request_id=request_id)
+            discord_notifier.send_request_summary(
+                request_id=request_id,
+                endpoint="/suggest-tags",
+                status="error",
+                duration_ms=0,
+                details={
+                    'error_message': 'No labels provided',
+                    'error_type': 'ValidationError',
+                    'num_labels': 0,
+                    'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+                }
+            )
             return jsonify({'error': 'No labels provided'}), 400
         
         # Score lecture with optional mode override
+        request_start_time = time.time()
+        
         with track_operation("score_lecture", logger, request_id=request_id):
             suggestions = score_lecture_v2(lecture, labels, scoring_mode=scoring_mode)
         
+        request_duration = (time.time() - request_start_time) * 1000  # Convert to ms
+        
         # Log scoring metrics
+        confidence_stats = {}
+        category_counts = {}
+        
         if suggestions:
             confidences = [s['confidence'] for s in suggestions]
             confidence_stats = {
@@ -773,7 +826,6 @@ def suggest_tags():
             }
             
             # Log category breakdown
-            category_counts = {}
             for s in suggestions:
                 cat = s.get('category', 'Unknown')
                 category_counts[cat] = category_counts.get(cat, 0) + 1
@@ -805,18 +857,50 @@ def suggest_tags():
             num_suggestions=len(suggestions)
         )
         
+        # Send Discord notification with request summary
+        discord_notifier.send_request_summary(
+            request_id=request_id,
+            endpoint="/suggest-tags",
+            status="success",
+            duration_ms=request_duration,
+            details={
+                'scoring_mode': scoring_mode or config.scoring_mode,
+                'num_suggestions': len(suggestions),
+                'num_labels': len(labels),
+                'confidence_stats': confidence_stats,
+                'category_breakdown': category_counts,
+                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+            }
+        )
+        
         return jsonify(response), 200
         
     except Exception as e:
+        error_request_id = data.get('request_id') if data else 'unknown'
+        
         logger.error(
             f"Error in suggest-tags endpoint",
-            request_id=data.get('request_id') if data else None,
+            request_id=error_request_id,
             error_type=type(e).__name__,
             error_message=str(e),
             lecture_id=lecture.get('id') if lecture else None
         )
         import traceback
         traceback.print_exc()
+        
+        # Send Discord notification for error
+        discord_notifier.send_request_summary(
+            request_id=error_request_id,
+            endpoint="/suggest-tags",
+            status="error",
+            duration_ms=0,
+            details={
+                'error_message': str(e),
+                'error_type': type(e).__name__,
+                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+            }
+        )
+        
         return jsonify({'error': str(e)}), 500
 
 
@@ -924,6 +1008,15 @@ def train():
         # Automatically reload prototypes after training
         with track_operation("reload_after_training", logger):
             load_prototypes_from_db()
+        
+        # Send Discord notification for training
+        discord_notifier.send_training_summary(
+            num_lectures=lectures_count,
+            num_prototypes=result.get('num_prototypes', 0),
+            num_low_data_tags=result.get('low_data_tags', 0),
+            duration_ms=0,  # Would need to track this separately
+            status="success"
+        )
         
         return jsonify(result), 200
         
