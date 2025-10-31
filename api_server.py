@@ -79,6 +79,9 @@ def load_prototypes_from_db():
         return False
 
 
+# Load prototypes on module import (for gunicorn)
+logger.info("Starting Tag Suggestions API...")
+load_prototypes_from_db()
 
 
 def validate_training_data(lectures: List[Dict], tags_data: Dict) -> Dict[str, any]:
