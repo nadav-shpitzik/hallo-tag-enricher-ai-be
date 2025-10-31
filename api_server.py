@@ -15,7 +15,7 @@ import json
 import logging
 import numpy as np
 from typing import List, Dict, Optional
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from replit import db
 from src.embeddings import EmbeddingsGenerator
 from src.prototype_knn import PrototypeKNN
@@ -26,14 +26,19 @@ from src.lecturer_search import LecturerSearchService
 from src.csv_parser import parse_csv_training_data
 from src.prototype_storage import PrototypeStorage
 from src.ensemble_scorer import EnsembleScorer
+from src.logging_utils import StructuredLogger, track_operation, sanitize_for_logging
+from src.request_logging import log_request_middleware, log_api_call_details, log_scoring_metrics
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger(__name__)
+logger = StructuredLogger(__name__)
 
 app = Flask(__name__)
+
+# Setup request logging middleware
+log_request_middleware(app)
 
 # Global state
 prototypes_loaded = False
@@ -47,33 +52,42 @@ def load_prototypes_from_db():
     global prototypes_loaded, prototype_knn, tag_embeddings_cache, config
     
     try:
-        storage = PrototypeStorage()
-        result = storage.load_prototypes(version_name='default')
-        
-        if not result:
-            logger.error("No prototypes found in database. Please train first.")
-            return False
-        
-        tag_prototypes, tag_thresholds, tag_stats, tag_embeddings = result
-        
-        # Initialize config
-        config = Config()
-        
-        # Create PrototypeKNN instance
-        prototype_knn = PrototypeKNN(config)
-        prototype_knn.tag_prototypes = tag_prototypes
-        prototype_knn.tag_thresholds = tag_thresholds
-        prototype_knn.tag_stats = tag_stats
-        
-        # Set tag embeddings cache
-        tag_embeddings_cache = tag_embeddings
-        
-        prototypes_loaded = True
-        logger.info(f"Loaded {len(prototype_knn.tag_prototypes)} prototypes from database")
-        return True
+        with track_operation("load_prototypes_from_db", logger):
+            storage = PrototypeStorage()
+            result = storage.load_prototypes(version_name='default')
+            
+            if not result:
+                logger.error("No prototypes found in database. Please train first.")
+                return False
+            
+            tag_prototypes, tag_thresholds, tag_stats, tag_embeddings = result
+            
+            # Initialize config
+            config = Config()
+            
+            # Create PrototypeKNN instance
+            prototype_knn = PrototypeKNN(config)
+            prototype_knn.tag_prototypes = tag_prototypes
+            prototype_knn.tag_thresholds = tag_thresholds
+            prototype_knn.tag_stats = tag_stats
+            
+            # Set tag embeddings cache
+            tag_embeddings_cache = tag_embeddings
+            
+            prototypes_loaded = True
+            logger.info(
+                f"Loaded prototypes from database",
+                num_prototypes=len(prototype_knn.tag_prototypes),
+                num_tags=len(tag_embeddings)
+            )
+            return True
         
     except Exception as e:
-        logger.error(f"Error loading prototypes from database: {e}")
+        logger.error(
+            f"Error loading prototypes from database",
+            error_type=type(e).__name__,
+            error_message=str(e)
+        )
         import traceback
         traceback.print_exc()
         return False
@@ -647,7 +661,13 @@ def score_lecture_v2(lecture: Dict, labels: List[Dict], scoring_mode: str = None
     """
     mode = scoring_mode or config.scoring_mode
     
-    logger.info(f"Scoring lecture {lecture.get('id')} with mode: {mode}")
+    logger.info(
+        f"Scoring lecture with mode: {mode}",
+        lecture_id=lecture.get('id'),
+        scoring_mode=mode,
+        num_labels=len(labels),
+        has_lecturer_info=bool(lecture.get('lecturer_id') or lecture.get('lecturer_name'))
+    )
     
     if mode == "ensemble":
         return score_lecture_with_ensemble(lecture, labels)
@@ -709,6 +729,7 @@ def suggest_tags():
         data = request.get_json()
         
         if not data:
+            logger.warning("No JSON data provided in suggest-tags request")
             return jsonify({'error': 'No JSON data provided'}), 400
         
         request_id = data.get('request_id')
@@ -718,14 +739,58 @@ def suggest_tags():
         lecture = data.get('lecture')
         labels = data.get('labels', [])
         
+        # Log request metadata (NOT the full payload - security)
+        logger.info(
+            "Tag suggestion request received",
+            request_id=request_id,
+            model_version=model_version,
+            artifact_version=artifact_version,
+            scoring_mode=scoring_mode or config.scoring_mode,
+            num_labels=len(labels),
+            lecture_id=lecture.get('id') if lecture else None,
+            has_description=bool(lecture.get('description')) if lecture else False
+        )
+        
         if not lecture:
+            logger.warning("No lecture provided", request_id=request_id)
             return jsonify({'error': 'No lecture provided'}), 400
         
         if not labels:
+            logger.warning("No labels provided", request_id=request_id)
             return jsonify({'error': 'No labels provided'}), 400
         
         # Score lecture with optional mode override
-        suggestions = score_lecture_v2(lecture, labels, scoring_mode=scoring_mode)
+        with track_operation("score_lecture", logger, request_id=request_id):
+            suggestions = score_lecture_v2(lecture, labels, scoring_mode=scoring_mode)
+        
+        # Log scoring metrics
+        if suggestions:
+            confidences = [s['confidence'] for s in suggestions]
+            confidence_stats = {
+                'avg': round(sum(confidences) / len(confidences), 3),
+                'max': round(max(confidences), 3),
+                'min': round(min(confidences), 3)
+            }
+            
+            # Log category breakdown
+            category_counts = {}
+            for s in suggestions:
+                cat = s.get('category', 'Unknown')
+                category_counts[cat] = category_counts.get(cat, 0) + 1
+            
+            log_scoring_metrics(
+                num_labels=len(labels),
+                num_suggestions=len(suggestions),
+                scoring_mode=scoring_mode or config.scoring_mode,
+                confidence_stats=confidence_stats
+            )
+            
+            logger.info(
+                "Scoring metrics",
+                request_id=request_id,
+                category_breakdown=category_counts,
+                confidence_stats=confidence_stats
+            )
         
         response = {
             'request_id': request_id,
@@ -734,10 +799,22 @@ def suggest_tags():
             'suggestions': suggestions
         }
         
+        logger.info(
+            "Tag suggestion request completed successfully",
+            request_id=request_id,
+            num_suggestions=len(suggestions)
+        )
+        
         return jsonify(response), 200
         
     except Exception as e:
-        logger.error(f"Error in suggest-tags: {e}")
+        logger.error(
+            f"Error in suggest-tags endpoint",
+            request_id=data.get('request_id') if data else None,
+            error_type=type(e).__name__,
+            error_message=str(e),
+            lecture_id=lecture.get('id') if lecture else None
+        )
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -792,7 +869,17 @@ def train():
         training_data = request.get_json()
         
         if not training_data:
+            logger.warning("No JSON data provided in train request")
             return jsonify({'error': 'No JSON data provided'}), 400
+        
+        lectures_count = len(training_data.get('lectures', []))
+        labels_count = len(training_data.get('labels', [])) if 'labels' in training_data else len(training_data.get('tags', {}))
+        
+        logger.info(
+            "Training request received",
+            num_lectures=lectures_count,
+            num_labels=labels_count
+        )
         
         # Detect format and convert to old format if needed
         if 'labels' in training_data and isinstance(training_data.get('labels'), list):
@@ -825,15 +912,27 @@ def train():
                 'tags': tags
             }
         
-        result = train_from_data(training_data)
+        with track_operation("train_prototypes", logger):
+            result = train_from_data(training_data)
+        
+        logger.info(
+            "Training completed successfully",
+            num_prototypes=result.get('num_prototypes'),
+            num_low_data_tags=result.get('low_data_tags')
+        )
         
         # Automatically reload prototypes after training
-        load_prototypes_from_db()
+        with track_operation("reload_after_training", logger):
+            load_prototypes_from_db()
         
         return jsonify(result), 200
         
     except Exception as e:
-        logger.error(f"Training error: {e}")
+        logger.error(
+            f"Training error",
+            error_type=type(e).__name__,
+            error_message=str(e)
+        )
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500

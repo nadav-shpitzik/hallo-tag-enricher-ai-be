@@ -3,8 +3,9 @@ from typing import List, Dict, Optional
 from openai import OpenAI
 import json
 from pydantic import BaseModel
+from src.logging_utils import StructuredLogger, track_operation
 
-logger = logging.getLogger(__name__)
+logger = StructuredLogger(__name__)
 
 class TagSuggestion(BaseModel):
     tag_id: str
@@ -23,6 +24,13 @@ class ReasoningScorer:
         self.min_confidence = min_confidence
         self.confidence_scale = confidence_scale  # Calibration factor for over-confident LLMs
     
+    def _estimate_llm_tokens(self, messages: List[Dict]) -> tuple[int, int]:
+        """Estimate input/output tokens (rough: 1 token ~ 4 chars)."""
+        input_chars = sum(len(str(m.get('content', ''))) for m in messages)
+        input_tokens = input_chars // 4
+        output_tokens = 200  # Conservative estimate for structured output
+        return input_tokens, output_tokens
+    
     def score_lecture(
         self,
         lecture: Dict,
@@ -36,13 +44,10 @@ class ReasoningScorer:
         
         prompt = self._build_prompt(lecture, tags_to_consider, lecturer_profile)
         
-        try:
-            response = self.client.beta.chat.completions.parse(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": """אתה מומחה בתיוג הרצאות בעברית. תפקידך לקרוא את תוכן ההרצאה ולהציע תגיות רלוונטיות.
+        messages = [
+            {
+                "role": "system",
+                "content": """אתה מומחה בתיוג הרצאות בעברית. תפקידך לקרוא את תוכן ההרצאה ולהציע תגיות רלוונטיות.
 
 כללים חשובים:
 1. היה **שמרן** ברמת הביטחון - הצע רק תגיות שהן ממש רלוונטיות
@@ -52,15 +57,47 @@ class ReasoningScorer:
 5. תן נימוק ברור בעברית למה התגית מתאימה
 6. אם אין תגיות מתאימות - אל תציע כלום
 7. העדף דיוק (precision) על פני כיסוי (recall) - עדיף פחות תגיות נכונות מאשר תגיות שגויות"""
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0.2,
-                response_format=TaggingResponse
-            )
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+        
+        try:
+            with track_operation("reasoning_llm_call", logger, lecture_id=lecture.get('id'), num_tags=len(tags_to_consider)):
+                response = self.client.beta.chat.completions.parse(
+                    model=self.model,
+                    messages=messages,
+                    temperature=0.2,
+                    response_format=TaggingResponse
+                )
+                
+                # Track LLM usage (with fallback estimation)
+                usage = response.usage
+                if usage and hasattr(usage, 'prompt_tokens'):
+                    input_tokens = usage.prompt_tokens
+                    output_tokens = usage.completion_tokens
+                    total_tokens = usage.total_tokens
+                else:
+                    # Estimate when API doesn't provide usage
+                    input_tokens, output_tokens = self._estimate_llm_tokens(messages)
+                    total_tokens = input_tokens + output_tokens
+                
+                # Estimate cost (gpt-4o-mini: ~$0.15/1M input, ~$0.60/1M output)
+                cost = (input_tokens / 1_000_000 * 0.15) + (output_tokens / 1_000_000 * 0.60)
+                
+                logger.info(
+                    "LLM reasoning call completed",
+                    model=self.model,
+                    lecture_id=lecture.get('id'),
+                    num_candidate_tags=len(tags_to_consider),
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    estimated_cost_usd=round(cost, 6),
+                    usage_source="api" if usage and hasattr(usage, 'prompt_tokens') else "estimated"
+                )
             
             result = response.choices[0].message.parsed
             
@@ -91,12 +128,22 @@ class ReasoningScorer:
                         'model': f'reasoning:{self.model}'
                     })
             
-            logger.debug(f"Lecture {lecture.get('id')}: {len(formatted_suggestions)} high-confidence suggestions (filtered from {len(result.suggestions)} total)")
+            logger.info(
+                "Reasoning scoring completed",
+                lecture_id=lecture.get('id'),
+                num_suggestions=len(formatted_suggestions),
+                filtered_from=len(result.suggestions)
+            )
             
             return formatted_suggestions
             
         except Exception as e:
-            logger.error(f"Error scoring lecture {lecture.get('id')} with reasoning model: {e}")
+            logger.error(
+                "Error in reasoning scorer",
+                lecture_id=lecture.get('id'),
+                error_type=type(e).__name__,
+                error_message=str(e)
+            )
             return []
     
     def _build_prompt(

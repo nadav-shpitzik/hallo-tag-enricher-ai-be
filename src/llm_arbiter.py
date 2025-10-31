@@ -2,14 +2,22 @@ from openai import OpenAI
 from typing import List, Dict, Set
 import logging
 import json
+from src.logging_utils import StructuredLogger, track_operation
 
-logger = logging.getLogger(__name__)
+logger = StructuredLogger(__name__)
 
 
 class LLMArbiter:
     def __init__(self, api_key: str, config):
         self.client = OpenAI(api_key=api_key)
         self.config = config
+    
+    def _estimate_llm_tokens(self, messages: List[Dict]) -> tuple[int, int]:
+        """Estimate input/output tokens (rough: 1 token ~ 4 chars)."""
+        input_chars = sum(len(str(m.get('content', ''))) for m in messages)
+        input_tokens = input_chars // 4
+        output_tokens = 50  # Conservative estimate for JSON selection
+        return input_tokens, output_tokens
     
     def refine_suggestions(
         self,
@@ -78,34 +86,62 @@ class LLMArbiter:
 
 בחר את מזהי התגיות הרלוונטיים ביותר."""
 
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+
         try:
-            response = self.client.chat.completions.create(
-                model=self.config.llm_model,
-                temperature=self.config.llm_temperature,
-                max_tokens=self.config.llm_max_tokens,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "tag_selection",
-                        "strict": True,
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "selected_tag_ids": {
-                                    "type": "array",
-                                    "items": {"type": "string"}
-                                }
-                            },
-                            "required": ["selected_tag_ids"],
-                            "additionalProperties": False
+            with track_operation("arbiter_llm_call", logger, num_candidates=len(candidates)):
+                response = self.client.chat.completions.create(
+                    model=self.config.llm_model,
+                    temperature=self.config.llm_temperature,
+                    max_tokens=self.config.llm_max_tokens,
+                    messages=messages,
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "tag_selection",
+                            "strict": True,
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "selected_tag_ids": {
+                                        "type": "array",
+                                        "items": {"type": "string"}
+                                    }
+                                },
+                                "required": ["selected_tag_ids"],
+                                "additionalProperties": False
+                            }
                         }
                     }
-                }
-            )
+                )
+                
+                # Track LLM usage (with fallback estimation)
+                usage = response.usage
+                if usage and hasattr(usage, 'prompt_tokens'):
+                    input_tokens = usage.prompt_tokens
+                    output_tokens = usage.completion_tokens
+                    total_tokens = usage.total_tokens
+                else:
+                    # Estimate when API doesn't provide usage
+                    input_tokens, output_tokens = self._estimate_llm_tokens(messages)
+                    total_tokens = input_tokens + output_tokens
+                
+                # Estimate cost (gpt-4o-mini: ~$0.15/1M input, ~$0.60/1M output)
+                cost = (input_tokens / 1_000_000 * 0.15) + (output_tokens / 1_000_000 * 0.60)
+                
+                logger.info(
+                    "LLM arbiter call completed",
+                    model=self.config.llm_model,
+                    num_candidates=len(candidates),
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    estimated_cost_usd=round(cost, 6),
+                    usage_source="api" if usage and hasattr(usage, 'prompt_tokens') else "estimated"
+                )
             
             content = response.choices[0].message.content
             if not content:
@@ -117,9 +153,17 @@ class LLMArbiter:
             valid_ids = [tag_id for tag_id in selected_ids 
                         if any(c['tag_id'] == tag_id for c in candidates)]
             
-            logger.debug(f"LLM selected {len(valid_ids)} tags from {len(candidates)} candidates")
+            logger.info(
+                "LLM arbiter selection completed",
+                num_selected=len(valid_ids),
+                num_candidates=len(candidates)
+            )
             return valid_ids
             
         except Exception as e:
-            logger.error(f"Error calling LLM arbiter: {e}")
+            logger.error(
+                "Error calling LLM arbiter",
+                error_type=type(e).__name__,
+                error_message=str(e)
+            )
             return []
