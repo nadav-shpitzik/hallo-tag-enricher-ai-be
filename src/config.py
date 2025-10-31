@@ -47,9 +47,9 @@ class Config:
         
         # Ensemble mode settings (combining reasoning + prototype scores)
         self.ensemble_reasoning_weight = float(kwargs.get('ensemble_reasoning_weight',
-                                                         os.getenv("ENSEMBLE_REASONING_WEIGHT", "0.80")))
+                                                         os.getenv("ENSEMBLE_REASONING_WEIGHT", "0.95")))
         self.ensemble_prototype_weight = float(kwargs.get('ensemble_prototype_weight',
-                                                         os.getenv("ENSEMBLE_PROTOTYPE_WEIGHT", "0.20")))
+                                                         os.getenv("ENSEMBLE_PROTOTYPE_WEIGHT", "0.05")))
         self.ensemble_agreement_bonus = float(kwargs.get('ensemble_agreement_bonus',
                                                         os.getenv("ENSEMBLE_AGREEMENT_BONUS", "0.15")))
         
