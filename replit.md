@@ -33,6 +33,7 @@ The API supports four scoring modes, balancing quality, speed, and cost:
 -   **PostgreSQL Storage**: Prototypes are stored in PostgreSQL, enabling versioning and visibility.
 -   **In-memory Caching**: Pre-computed prototypes are cached in memory for fast suggestion responses.
 -   **Lecturer Bio Enrichment**: In reasoning and ensemble modes, GPT-4o is used to search, validate, and cache lecturer bios in PostgreSQL (`lecturer_bios` table) to enrich LLM prompts and improve accuracy.
+-   **Category-Aware Prompting**: LLM prompts include explicit definitions for 5 tag categories (Topic, Persona, Tone, Format, Audience) and organize tags by category for improved context understanding. Structure supports future category-specific instructions.
 -   **Structured Logging**: Uses structured JSON logging with `request_id` correlation, performance metrics, business metrics, and error context for observability.
 -   **LLM Cost Monitoring**: Tracks token usage and estimates costs for all OpenAI API calls.
 -   **Discord Notifications**: Configurable Discord webhooks for comprehensive request summaries, performance data, quality metrics, and error details.
