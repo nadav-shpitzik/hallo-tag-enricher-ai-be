@@ -49,14 +49,36 @@ class ReasoningScorer:
                 "role": "system",
                 "content": """אתה מומחה בתיוג הרצאות בעברית. תפקידך לקרוא את תוכן ההרצאה ולהציע תגיות רלוונטיות.
 
-כללים חשובים:
+## קטגוריות תגיות
+תגיות מחולקות ל-5 קטגוריות, כל אחת משרתת מטרה שונה:
+
+1. **Topic (נושא)**: התוכן המרכזי של ההרצאה - על מה היא עוסקת?
+   - דוגמאות: בריאות הנפש, הורות, עסקים, מדע, אמנות
+
+2. **Persona (דמות)**: מי המרצה או איזה סוג דמות מדבר?
+   - דוגמאות: סלבריטאים, מומחים מקצועיים, אנשי ציבור, פעילים חברתיים
+
+3. **Tone (טון)**: האווירה והגישה הרגשית של ההרצאה
+   - דוגמאות: אישי, אקדמי, מעורר השראה, הומוריסטי, רציני
+
+4. **Format (פורמט)**: המבנה והסגנון של ההרצאה
+   - דוגמאות: הרצאה פרונטלית, ריאיון, פאנל, סיפור אישי, מקרה מעשי
+
+5. **Audience (קהל יעד)**: למי ההרצאה מיועדת?
+   - דוגמאות: קהל רחב, מקצועי, הורים, צעירים, אנשי עסקים
+
+## כללים חשובים
 1. היה **שמרן** ברמת הביטחון - הצע רק תגיות שהן ממש רלוונטיות
 2. השתמש ברמות ביטחון שונות: 0.60-0.70 לרלוונטיות בסיסית, 0.70-0.80 לרלוונטיות טובה, 0.80-0.95 רק לרלוונטיות מצוינת ומובהקת
 3. התמקד בנושא המרכזי של ההרצאה - אל תציע יותר מדי תגיות
-4. השתמש במידע על המרצה כדי להבין טוב יותר את תוכן ההרצאה
-5. תן נימוק ברור בעברית למה התגית מתאימה
-6. אם אין תגיות מתאימות - אל תציע כלום
-7. העדף דיוק (precision) על פני כיסוי (recall) - עדיף פחות תגיות נכונות מאשר תגיות שגויות"""
+4. **שים לב לקטגוריה** של כל תגית - זה עוזר להבין את ההקשר והשימוש שלה
+5. השתמש במידע על המרצה כדי להבין טוב יותר את תוכן ההרצאה
+6. תן נימוק ברור בעברית למה התגית מתאימה
+7. אם אין תגיות מתאימות - אל תציע כלום
+8. העדף דיוק (precision) על פני כיסוי (recall) - עדיף פחות תגיות נכונות מאשר תגיות שגויות
+
+## הנחיות לפי קטגוריה
+(מקום להנחיות ספציפיות לכל קטגוריה בעתיד)"""
             },
             {
                 "role": "user",
@@ -167,12 +189,30 @@ class ReasoningScorer:
                 prompt_parts.append(f"**רקע על המרצה:** {lecturer_profile}\n")
         
         prompt_parts.append(f"\n# תגיות זמינות ({len(tags)} אופציות)\n")
+        prompt_parts.append("התגיות מקובצות לפי קטגוריה:\n\n")
         
+        tags_by_category = {}
         for tag in tags:
-            tag_line = f"- **{tag['tag_id']}**: {tag['name_he']}"
-            if tag.get('synonyms_he'):
-                tag_line += f" (שמות נוספים: {tag['synonyms_he']})"
-            prompt_parts.append(tag_line + "\n")
+            category = tag.get('category', 'Unknown')
+            if category not in tags_by_category:
+                tags_by_category[category] = []
+            tags_by_category[category].append(tag)
+        
+        category_order = ['Topic', 'Persona', 'Tone', 'Format', 'Audience', 'Unknown']
+        for category in category_order:
+            if category not in tags_by_category:
+                continue
+            
+            category_tags = tags_by_category[category]
+            prompt_parts.append(f"### {category}\n")
+            
+            for tag in category_tags:
+                tag_line = f"- **{tag['tag_id']}**: {tag['name_he']}"
+                if tag.get('synonyms_he'):
+                    tag_line += f" (שמות נוספים: {tag['synonyms_he']})"
+                prompt_parts.append(tag_line + "\n")
+            
+            prompt_parts.append("\n")
         
         prompt_parts.append("\n# משימה\n")
         prompt_parts.append("על בסיס תוכן ההרצאה והרקע על המרצה, הצע תגיות מתאימות.\n")

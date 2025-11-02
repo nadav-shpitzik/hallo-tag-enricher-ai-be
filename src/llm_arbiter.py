@@ -35,6 +35,7 @@ class LLMArbiter:
             {
                 'tag_id': tag_id,
                 'name_he': candidate_tags[tag_id]['name_he'],
+                'category': candidate_tags[tag_id].get('category', 'Unknown'),
                 'score': scores[tag_id]
             }
             for tag_id in borderline_tags
@@ -68,12 +69,21 @@ class LLMArbiter:
     ) -> List[str]:
         system_prompt = """אתה מומחה לתיוג הרצאות בעברית.
 תפקידך לבחור תגיות רלוונטיות מתוך רשימת מועמדים.
+
+## קטגוריות תגיות
+תגיות מחולקות ל-5 קטגוריות:
+- **Topic**: נושא ההרצאה (על מה היא עוסקת)
+- **Persona**: דמות המרצה (מי מדבר)
+- **Tone**: טון ואווירה של ההרצאה
+- **Format**: מבנה וסגנון ההרצאה
+- **Audience**: קהל היעד
+
 החזר רק את מזהי התגיות (tag_id) שמתאימים באמת להרצאה.
 העדף דיוק גבוה - אם אתה לא בטוח, אל תכלול תגית.
 אם אין תגיות מתאימות, החזר רשימה ריקה."""
 
         candidates_text = "\n".join([
-            f"- {c['tag_id']}: {c['name_he']} (ציון: {c['score']:.3f})"
+            f"- {c['tag_id']}: {c['name_he']} [{c.get('category', 'Unknown')}] (ציון: {c['score']:.3f})"
             for c in candidates
         ])
         
