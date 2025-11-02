@@ -19,7 +19,7 @@ The API supports four scoring modes, balancing quality, speed, and cost:
 1.  **Ensemble Mode (`"ensemble"`)**: (NEW DEFAULT) Combines reasoning model (80%) and prototype model (20%) with an agreement bonus for highest accuracy. Includes lecturer bio auto-enrichment.
 2.  **Fast Mode (`"fast"`)**: Uses only prototype similarity for the fastest and cheapest suggestions.
 3.  **Full Quality Mode (`"full_quality"`)**: Uses prototype scoring with an LLM arbiter for borderline cases, balancing speed and quality.
-4.  **Reasoning Mode (`"reasoning"`)**: Pure GPT-4o-mini analysis providing high-quality suggestions with detailed Hebrew rationales and lecturer bio auto-enrichment.
+4.  **Reasoning Mode (`"reasoning"`)**: Pure GPT-4o analysis providing highest-quality suggestions with detailed Hebrew rationales and lecturer bio auto-enrichment.
 
 ### Data Flow
 -   **Training Flow**: Client sends training data, API generates embeddings, builds prototypes, calibrates thresholds, and saves versioned prototypes to PostgreSQL.
@@ -44,7 +44,7 @@ The API supports four scoring modes, balancing quality, speed, and cost:
 -   `src/`: Contains core modules like `config.py`, `embeddings.py`, `prototype_knn.py`, `prototype_storage.py`, `scorer.py`, `reasoning_scorer.py`, `ensemble_scorer.py`, `llm_arbiter.py`, `lecturer_search.py`, `csv_parser.py`, and `shortlist.py`.
 
 ## External Dependencies
--   **OpenAI**: Used for `text-embedding-3-large` embeddings and GPT-4o/GPT-4o-mini for LLM-based reasoning, arbitration, and lecturer bio enrichment.
+-   **OpenAI**: Used for `text-embedding-3-large` embeddings and GPT-4o for LLM-based reasoning, arbitration, and lecturer bio enrichment.
 -   **PostgreSQL**: Database for storing versioned prototypes and cached lecturer bios.
 -   **Flask**: Python web framework for building the REST API.
 -   **NumPy**: For numerical operations, particularly vector manipulation.

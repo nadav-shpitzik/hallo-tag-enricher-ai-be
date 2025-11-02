@@ -18,7 +18,7 @@ class TaggingResponse(BaseModel):
     reasoning_summary: str
 
 class ReasoningScorer:
-    def __init__(self, model: str = "gpt-4o-mini", min_confidence: float = 0.85, confidence_scale: float = 0.85):
+    def __init__(self, model: str = "gpt-4o", min_confidence: float = 0.80, confidence_scale: float = 0.85):
         self.client = OpenAI()
         self.model = model
         self.min_confidence = min_confidence
@@ -106,8 +106,8 @@ class ReasoningScorer:
                     input_tokens, output_tokens = self._estimate_llm_tokens(messages)
                     total_tokens = input_tokens + output_tokens
                 
-                # Estimate cost (gpt-4o-mini: ~$0.15/1M input, ~$0.60/1M output)
-                cost = (input_tokens / 1_000_000 * 0.15) + (output_tokens / 1_000_000 * 0.60)
+                # Estimate cost (gpt-4o: $5.00/1M input, $15.00/1M output)
+                cost = (input_tokens / 1_000_000 * 5.00) + (output_tokens / 1_000_000 * 15.00)
                 
                 logger.info(
                     "LLM reasoning call completed",
