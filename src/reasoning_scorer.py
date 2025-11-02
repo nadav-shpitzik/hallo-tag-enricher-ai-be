@@ -1,11 +1,14 @@
 import logging
+import time
 from typing import List, Dict, Optional
 from openai import OpenAI
 import json
 from pydantic import BaseModel
-from src.logging_utils import StructuredLogger, track_operation
+from src.logging_utils import StructuredLogger, track_operation, _request_context
+from src.ai_call_logger import AICallLogger
 
 logger = StructuredLogger(__name__)
+ai_call_logger = AICallLogger()
 
 class TagSuggestion(BaseModel):
     tag_id: str
@@ -86,7 +89,13 @@ class ReasoningScorer:
             }
         ]
         
+        # Get request_id from context for correlation
+        request_id = getattr(_request_context, 'request_id', None)
+        
         try:
+            # Track call timing
+            call_start_time = time.time()
+            
             with track_operation("reasoning_llm_call", logger, lecture_id=lecture.get('id'), num_tags=len(tags_to_consider)):
                 response = self.client.beta.chat.completions.parse(
                     model=self.model,
@@ -94,6 +103,9 @@ class ReasoningScorer:
                     temperature=0.2,
                     response_format=TaggingResponse
                 )
+                
+                # Calculate call duration
+                call_duration_ms = (time.time() - call_start_time) * 1000
                 
                 # Track LLM usage (with fallback estimation)
                 usage = response.usage
@@ -122,6 +134,38 @@ class ReasoningScorer:
                 )
             
             result = response.choices[0].message.parsed
+            
+            # Prepare response content for database logging
+            response_content = None
+            if result:
+                response_content = {
+                    'suggestions': [
+                        {
+                            'tag_id': sugg.tag_id,
+                            'tag_name_he': sugg.tag_name_he,
+                            'confidence': sugg.confidence,
+                            'rationale_he': sugg.rationale_he
+                        }
+                        for sugg in result.suggestions
+                    ],
+                    'reasoning_summary': result.reasoning_summary
+                }
+            
+            # Log AI call to database
+            ai_call_logger.log_call(
+                call_type="reasoning_scorer",
+                model=self.model,
+                prompt_messages=messages,
+                response_content=response_content,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                estimated_cost_usd=cost,
+                duration_ms=call_duration_ms,
+                status="success",
+                request_id=request_id,
+                lecture_id=lecture.get('id')
+            )
             
             if result is None:
                 logger.warning(f"No parsed result for lecture {lecture.get('id')}")
@@ -160,6 +204,25 @@ class ReasoningScorer:
             return formatted_suggestions
             
         except Exception as e:
+            # Log failed AI call to database
+            call_duration_ms = (time.time() - call_start_time) * 1000 if 'call_start_time' in locals() else 0
+            
+            ai_call_logger.log_call(
+                call_type="reasoning_scorer",
+                model=self.model,
+                prompt_messages=messages,
+                response_content=None,
+                input_tokens=0,
+                output_tokens=0,
+                total_tokens=0,
+                estimated_cost_usd=0.0,
+                duration_ms=call_duration_ms,
+                status="error",
+                error_message=str(e),
+                request_id=request_id,
+                lecture_id=lecture.get('id')
+            )
+            
             logger.error(
                 "Error in reasoning scorer",
                 lecture_id=lecture.get('id'),
@@ -207,7 +270,7 @@ class ReasoningScorer:
             prompt_parts.append(f"### {category}\n")
             
             for tag in category_tags:
-                tag_line = f"- **{tag['tag_id']}**: {tag['name_he']}"
+                tag_line = f"- **{tag['tag_id']}**: {tag['tag_name_he']}"
                 if tag.get('synonyms_he'):
                     tag_line += f" (שמות נוספים: {tag['synonyms_he']})"
                 prompt_parts.append(tag_line + "\n")

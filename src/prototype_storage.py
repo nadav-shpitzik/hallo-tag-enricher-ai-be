@@ -76,6 +76,27 @@ class PrototypeStorage:
                     )
                 """)
                 
+                # AI calls tracking table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ai_calls (
+                        id SERIAL PRIMARY KEY,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        request_id VARCHAR(255),
+                        call_type VARCHAR(100) NOT NULL,
+                        model VARCHAR(100) NOT NULL,
+                        lecture_id VARCHAR(255),
+                        prompt_messages JSONB NOT NULL,
+                        response_content JSONB,
+                        input_tokens INTEGER,
+                        output_tokens INTEGER,
+                        total_tokens INTEGER,
+                        estimated_cost_usd FLOAT,
+                        duration_ms FLOAT,
+                        status VARCHAR(50),
+                        error_message TEXT
+                    )
+                """)
+                
                 # Create indexes for faster lookups
                 cur.execute("""
                     CREATE INDEX IF NOT EXISTS idx_tag_prototypes_version 
@@ -88,6 +109,18 @@ class PrototypeStorage:
                 cur.execute("""
                     CREATE INDEX IF NOT EXISTS idx_tag_embeddings_version 
                     ON tag_embeddings(version_id)
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_ai_calls_request_id 
+                    ON ai_calls(request_id)
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_ai_calls_created_at 
+                    ON ai_calls(created_at)
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_ai_calls_call_type 
+                    ON ai_calls(call_type)
                 """)
                 
                 conn.commit()
