@@ -11,8 +11,7 @@ logger = StructuredLogger(__name__)
 ai_call_logger = AICallLogger()
 
 class TagSuggestion(BaseModel):
-    tag_id: str
-    tag_name_he: str
+    tag_name_he: str  # LLM only returns the Hebrew name
     confidence: float
     rationale_he: str
 
@@ -136,13 +135,12 @@ class ReasoningScorer:
             
             result = response.choices[0].message.parsed
             
-            # Prepare response content for database logging
+            # Prepare response content for database logging (only tag names now)
             response_content = None
             if result:
                 response_content = {
                     'suggestions': [
                         {
-                            'tag_id': sugg.tag_id,
                             'tag_name_he': sugg.tag_name_he,
                             'confidence': sugg.confidence,
                             'rationale_he': sugg.rationale_he
@@ -172,15 +170,35 @@ class ReasoningScorer:
                 logger.warning(f"No parsed result for lecture {lecture.get('id')}")
                 return []
             
-            # Create tag_id validation set
-            valid_tag_ids = {tag['tag_id'] for tag in all_tags}
+            # Create name -> tag_id mapping for post-processing
+            name_to_tag = {}
+            for tag in all_tags:
+                name_he = tag.get('name_he', '').strip()
+                if name_he:
+                    name_to_tag[name_he] = tag
+                    
+                    # Also add synonyms as aliases
+                    synonyms = tag.get('synonyms_he', '').strip()
+                    if synonyms:
+                        for synonym in synonyms.split(','):
+                            synonym = synonym.strip()
+                            if synonym:
+                                name_to_tag[synonym] = tag
             
             formatted_suggestions = []
             for sugg in result.suggestions:
-                # Validate tag_id exists in our tags list
-                if sugg.tag_id not in valid_tag_ids:
-                    logger.warning(f"LLM hallucinated invalid tag_id '{sugg.tag_id}' for tag '{sugg.tag_name_he}' - skipping")
+                # Map tag_name_he -> tag_id using our mapping
+                tag_name = sugg.tag_name_he.strip()
+                
+                if tag_name not in name_to_tag:
+                    logger.warning(
+                        f"LLM returned tag name '{tag_name}' which doesn't match any known tag - skipping",
+                        request_id=_request_context.get()
+                    )
                     continue
+                
+                matched_tag = name_to_tag[tag_name]
+                tag_id = matched_tag['tag_id']
                 
                 # Apply confidence calibration (LLMs tend to be over-confident)
                 calibrated_confidence = sugg.confidence * self.confidence_scale
@@ -188,8 +206,8 @@ class ReasoningScorer:
                 # Only include if calibrated confidence meets threshold
                 if calibrated_confidence >= self.min_confidence:
                     formatted_suggestions.append({
-                        'tag_id': sugg.tag_id,
-                        'tag_name_he': sugg.tag_name_he,
+                        'tag_id': tag_id,
+                        'tag_name_he': tag_name,
                         'score': calibrated_confidence,
                         'rationale': sugg.rationale_he,
                         'model': f'reasoning:{self.model}'
@@ -271,7 +289,8 @@ class ReasoningScorer:
             prompt_parts.append(f"### {category}\n")
             
             for tag in category_tags:
-                tag_line = f"- **{tag['tag_id']}**: {tag.get('name_he', '')}"
+                # Show tag name first since that's what LLM will use
+                tag_line = f"- **{tag.get('name_he', '')}**"
                 if tag.get('synonyms_he'):
                     tag_line += f" (שמות נוספים: {tag['synonyms_he']})"
                 prompt_parts.append(tag_line + "\n")
@@ -281,18 +300,16 @@ class ReasoningScorer:
         prompt_parts.append("\n# משימה\n")
         prompt_parts.append("על בסיס תוכן ההרצאה והרקע על המרצה, הצע תגיות מתאימות **מתוך רשימת התגיות שסופקה בלבד**.\n\n")
         prompt_parts.append("לכל תגית ציין:\n")
-        prompt_parts.append("1. מזהה התגית (tag_id) - **רק מהרשימה למעלה**\n")
-        prompt_parts.append("2. שם התגית בעברית\n")
-        prompt_parts.append("3. רמת ביטחון (0.0-1.0)\n")
-        prompt_parts.append("4. נימוק בעברית למה התגית מתאימה\n\n")
+        prompt_parts.append("1. שם התגית בעברית (**העתק בדיוק** מהרשימה למעלה)\n")
+        prompt_parts.append("2. רמת ביטחון (0.0-1.0)\n")
+        prompt_parts.append("3. נימוק בעברית למה התגית מתאימה\n\n")
         
         prompt_parts.append("## פורמט פלט נדרש (דוגמה)\n")
         prompt_parts.append('```json\n')
         prompt_parts.append('{\n')
         prompt_parts.append('  "suggestions": [\n')
         prompt_parts.append('    {\n')
-        prompt_parts.append('      "tag_id": "REPLACE_WITH_ACTUAL_TAG_ID_FROM_LIST_ABOVE",\n')
-        prompt_parts.append('      "tag_name_he": "שם התגית המתאים מהרשימה",\n')
+        prompt_parts.append('      "tag_name_he": "בריאות הנפש",\n')
         prompt_parts.append('      "confidence": 0.88,\n')
         prompt_parts.append('      "rationale_he": "נימוק מפורט בעברית למה התגית מתאימה להרצאה זו"\n')
         prompt_parts.append('    }\n')
@@ -300,7 +317,7 @@ class ReasoningScorer:
         prompt_parts.append('  "reasoning_summary": "בהתבסס על התוכן, נבחרו תגיות עם קשר ברור לנושא המרכזי."\n')
         prompt_parts.append('}\n')
         prompt_parts.append('```\n\n')
-        prompt_parts.append("⚠️ **חשוב ביותר:** השתמש רק ב-tag_id **המדויק** מהרשימה למעלה. אל תעתיק את הדוגמה - בחר את ה-tag_id הנכון מהרשימה!\n")
+        prompt_parts.append("⚠️ **חשוב ביותר:** השתמש רק בשמות תגיות **המדויקים** מהרשימה למעלה. העתק את השם כמו שהוא, כולל ניקוד ואותיות. המערכת תשייך את ה-ID אוטומטית.\n")
         
         return "".join(prompt_parts)
     
