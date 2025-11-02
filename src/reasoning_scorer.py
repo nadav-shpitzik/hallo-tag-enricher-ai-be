@@ -271,7 +271,7 @@ class ReasoningScorer:
             prompt_parts.append(f"### {category}\n")
             
             for tag in category_tags:
-                tag_line = f"- **{tag['tag_id']}**: {tag['tag_name_he']}"
+                tag_line = f"- **{tag['tag_id']}**: {tag.get('name_he', '')}"
                 if tag.get('synonyms_he'):
                     tag_line += f" (שמות נוספים: {tag['synonyms_he']})"
                 prompt_parts.append(tag_line + "\n")
@@ -291,16 +291,16 @@ class ReasoningScorer:
         prompt_parts.append('{\n')
         prompt_parts.append('  "suggestions": [\n')
         prompt_parts.append('    {\n')
-        prompt_parts.append('      "tag_id": "rec2xd8GesIcSMdA9",\n')
-        prompt_parts.append('      "tag_name_he": "הורות",\n')
+        prompt_parts.append('      "tag_id": "REPLACE_WITH_ACTUAL_TAG_ID_FROM_LIST_ABOVE",\n')
+        prompt_parts.append('      "tag_name_he": "שם התגית המתאים מהרשימה",\n')
         prompt_parts.append('      "confidence": 0.88,\n')
-        prompt_parts.append('      "rationale_he": "ההרצאה עוסקת באתגרים של גידול ילדים והקשר בין הורים לילדים"\n')
+        prompt_parts.append('      "rationale_he": "נימוק מפורט בעברית למה התגית מתאימה להרצאה זו"\n')
         prompt_parts.append('    }\n')
         prompt_parts.append('  ],\n')
-        prompt_parts.append('  "reasoning_summary": "בהתבסס על התוכן, נבחרו תגיות עם קשר ברור לנושא המרכזי והמרצה."\n')
+        prompt_parts.append('  "reasoning_summary": "בהתבסס על התוכן, נבחרו תגיות עם קשר ברור לנושא המרכזי."\n')
         prompt_parts.append('}\n')
         prompt_parts.append('```\n\n')
-        prompt_parts.append("⚠️ **חשוב:** השתמש רק ב-tag_id מהרשימה שסופקה למעלה. אל תמציא תגיות חדשות.\n")
+        prompt_parts.append("⚠️ **חשוב ביותר:** השתמש רק ב-tag_id **המדויק** מהרשימה למעלה. אל תעתיק את הדוגמה - בחר את ה-tag_id הנכון מהרשימה!\n")
         
         return "".join(prompt_parts)
     
