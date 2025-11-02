@@ -92,9 +92,10 @@ class ReasoningScorer:
         # Get request_id from context for correlation
         request_id = getattr(_request_context, 'request_id', None)
         
+        # Track call timing
+        call_start_time = time.time()
+        
         try:
-            # Track call timing
-            call_start_time = time.time()
             
             with track_operation("reasoning_llm_call", logger, lecture_id=lecture.get('id'), num_tags=len(tags_to_consider)):
                 response = self.client.beta.chat.completions.parse(

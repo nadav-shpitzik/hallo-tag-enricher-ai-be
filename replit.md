@@ -36,12 +36,13 @@ The API supports four scoring modes, balancing quality, speed, and cost:
 -   **Category-Aware Prompting**: LLM prompts include explicit definitions for 5 tag categories (Topic, Persona, Tone, Format, Audience) and organize tags by category for improved context understanding. Structure supports future category-specific instructions.
 -   **Structured Logging**: Uses structured JSON logging with `request_id` correlation, performance metrics, business metrics, and error context for observability.
 -   **LLM Cost Monitoring**: Tracks token usage and estimates costs for all OpenAI API calls.
+-   **AI Call Tracking**: All ReasoningScorer AI calls are logged to PostgreSQL (`ai_calls` table) with full prompt/response content (JSONB), token counts, costs, duration, and status for auditing and debugging expensive GPT-4o calls.
 -   **Discord Notifications**: Configurable Discord webhooks for comprehensive request summaries, performance data, quality metrics, and error details.
 
 ### Files Structure
 -   `api_server.py`: Main API server.
 -   `train_prototypes.py`: Standalone training script.
--   `src/`: Contains core modules like `config.py`, `embeddings.py`, `prototype_knn.py`, `prototype_storage.py`, `scorer.py`, `reasoning_scorer.py`, `ensemble_scorer.py`, `llm_arbiter.py`, `lecturer_search.py`, `csv_parser.py`, and `shortlist.py`.
+-   `src/`: Contains core modules like `config.py`, `embeddings.py`, `prototype_knn.py`, `prototype_storage.py`, `scorer.py`, `reasoning_scorer.py`, `ensemble_scorer.py`, `llm_arbiter.py`, `lecturer_search.py`, `ai_call_logger.py`, `csv_parser.py`, and `shortlist.py`.
 
 ## External Dependencies
 -   **OpenAI**: Used for `text-embedding-3-large` embeddings and GPT-4o for LLM-based reasoning, arbitration, and lecturer bio enrichment.
