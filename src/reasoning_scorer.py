@@ -10,34 +10,16 @@ from src.ai_call_logger import AICallLogger
 logger = StructuredLogger(__name__)
 ai_call_logger = AICallLogger()
 
-def create_constrained_tag_model(tag_names: List[str]):
-    """
-    Dynamically create a Pydantic model with tag_name_he constrained to exact tag names.
-    This forces the LLM to only return exact matches from the provided list.
-    """
-    from enum import Enum
-    
-    # Create Enum with safe member names (sequential IDs) and tag names as values
-    # Example: tag_0 = "החברה הישראלית", tag_1 = "מדיה ותקשורת", etc.
-    enum_dict = {f'tag_{i}': name for i, name in enumerate(tag_names)}
-    TagNameEnum = Enum('TagNameEnum', enum_dict)
-    
-    # Create TagSuggestion model with constrained tag_name_he
-    TagSuggestion = create_model(
-        'TagSuggestion',
-        tag_name_he=(TagNameEnum, Field(description="Exact tag name from the provided list")),
-        confidence=(float, Field(description="Confidence score 0.0-1.0")),
-        rationale_he=(str, Field(description="Hebrew rationale for why this tag fits"))
-    )
-    
-    # Create TaggingResponse model
-    TaggingResponse = create_model(
-        'TaggingResponse',
-        suggestions=(List[TagSuggestion], Field(description="List of tag suggestions")),
-        reasoning_summary=(str, Field(description="Hebrew summary of reasoning process"))
-    )
-    
-    return TaggingResponse
+class TagSuggestion(BaseModel):
+    """Single tag suggestion with confidence and rationale."""
+    tag_name_he: str = Field(description="Exact tag name from the provided list")
+    confidence: float = Field(description="Confidence score 0.0-1.0")
+    rationale_he: str = Field(description="Hebrew rationale for why this tag fits")
+
+class TaggingResponse(BaseModel):
+    """Response model for tag suggestions."""
+    suggestions: List[TagSuggestion] = Field(description="List of tag suggestions")
+    reasoning_summary: str = Field(description="Hebrew summary of reasoning process")
 
 class ReasoningScorer:
     def __init__(self, model: str = "gpt-4o", min_confidence: float = 0.80, confidence_scale: float = 0.85):
@@ -63,12 +45,6 @@ class ReasoningScorer:
         tags_to_consider = candidate_tags if candidate_tags and len(candidate_tags) > 0 else all_tags
         
         logger.debug(f"Considering {len(tags_to_consider)} tags for lecture {lecture.get('id')}")
-        
-        # Extract tag names for enum constraint
-        tag_names = [tag.get('name_he', '') for tag in tags_to_consider if tag.get('name_he')]
-        
-        # Create constrained response model
-        TaggingResponse = create_constrained_tag_model(tag_names)
         
         prompt = self._build_prompt(lecture, tags_to_consider, lecturer_profile)
         
@@ -172,13 +148,13 @@ class ReasoningScorer:
             
             result = response.choices[0].message.parsed
             
-            # Prepare response content for database logging (only tag names now)
+            # Prepare response content for database logging
             response_content = None
             if result:
                 response_content = {
                     'suggestions': [
                         {
-                            'tag_name_he': sugg.tag_name_he.value if hasattr(sugg.tag_name_he, 'value') else str(sugg.tag_name_he),
+                            'tag_name_he': str(sugg.tag_name_he),
                             'confidence': sugg.confidence,
                             'rationale_he': sugg.rationale_he
                         }
@@ -224,14 +200,8 @@ class ReasoningScorer:
             
             formatted_suggestions = []
             for sugg in result.suggestions:
-                # Extract tag name (handle Enum values)
-                tag_name_raw = sugg.tag_name_he
-                if hasattr(tag_name_raw, 'value'):
-                    # It's an Enum
-                    tag_name = tag_name_raw.value
-                else:
-                    # It's a string
-                    tag_name = str(tag_name_raw).strip()
+                # Extract tag name (Literal type returns string directly)
+                tag_name = str(sugg.tag_name_he).strip()
                 
                 if tag_name not in name_to_tag:
                     logger.warning(
