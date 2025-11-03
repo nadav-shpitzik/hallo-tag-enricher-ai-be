@@ -193,7 +193,7 @@ class ReasoningScorer:
                 if tag_name not in name_to_tag:
                     logger.warning(
                         f"LLM returned tag name '{tag_name}' which doesn't match any known tag - skipping",
-                        request_id=_request_context.get()
+                        request_id=getattr(_request_context, 'request_id', None)
                     )
                     continue
                 
