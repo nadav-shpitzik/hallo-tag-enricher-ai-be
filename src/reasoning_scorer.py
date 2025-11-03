@@ -45,6 +45,9 @@ class ReasoningScorer:
         tags_to_consider = candidate_tags if candidate_tags and len(candidate_tags) > 0 else all_tags
         
         logger.debug(f"Considering {len(tags_to_consider)} tags for lecture {lecture.get('id')}")
+        if tags_to_consider and len(tags_to_consider) > 0:
+            sample_tag = tags_to_consider[0]
+            logger.debug(f"Sample tag structure: {sample_tag}")
         
         prompt = self._build_prompt(lecture, tags_to_consider, lecturer_profile)
         
@@ -292,6 +295,9 @@ class ReasoningScorer:
             if category not in tags_by_category:
                 tags_by_category[category] = []
             tags_by_category[category].append(tag)
+        
+        # Debug logging to see what categories were found
+        logger.debug(f"Tags by category: {list(tags_by_category.keys())}, total tags: {len(tags)}")
         
         category_order = ['Topic', 'Persona', 'Tone', 'Format', 'Audience', 'Unknown']
         for category in category_order:
