@@ -44,10 +44,10 @@ class ReasoningScorer:
     ) -> List[Dict]:
         tags_to_consider = candidate_tags if candidate_tags and len(candidate_tags) > 0 else all_tags
         
-        logger.debug(f"Considering {len(tags_to_consider)} tags for lecture {lecture.get('id')}")
+        logger.info(f"Considering {len(tags_to_consider)} tags for lecture {lecture.get('id')}")
         if tags_to_consider and len(tags_to_consider) > 0:
             sample_tag = tags_to_consider[0]
-            logger.debug(f"Sample tag structure: {sample_tag}")
+            logger.info(f"Sample tag structure: {sample_tag}")
         
         prompt = self._build_prompt(lecture, tags_to_consider, lecturer_profile)
         
@@ -297,7 +297,9 @@ class ReasoningScorer:
             tags_by_category[category].append(tag)
         
         # Debug logging to see what categories were found
-        logger.debug(f"Tags by category: {list(tags_by_category.keys())}, total tags: {len(tags)}")
+        logger.info(f"Tags by category: {list(tags_by_category.keys())}, total tags: {len(tags)}")
+        if len(tags_by_category) == 0:
+            logger.warning(f"NO CATEGORIES FOUND! First tag sample: {tags[0] if tags else 'NO TAGS'}")
         
         category_order = ['Topic', 'Persona', 'Tone', 'Format', 'Audience', 'Unknown']
         for category in category_order:
