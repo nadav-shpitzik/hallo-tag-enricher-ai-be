@@ -24,7 +24,7 @@ class Config:
         # Model settings
         self.embedding_model = kwargs.get('embedding_model', os.getenv("EMBEDDING_MODEL", "text-embedding-3-large"))
         self.embedding_dimensions = 3072
-        self.llm_model = kwargs.get('llm_model', os.getenv("LLM_MODEL", "gpt-4o-mini"))
+        self.llm_model = "gpt-4o"  # Forced to gpt-4o for quality and exact tag matching
         self.llm_temperature = 0.0
         self.llm_max_tokens = 500
         
