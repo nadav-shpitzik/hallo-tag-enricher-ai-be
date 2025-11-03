@@ -298,16 +298,28 @@ class ReasoningScorer:
         
         # Debug logging to see what categories were found
         logger.info(f"Tags by category: {list(tags_by_category.keys())}, total tags: {len(tags)}")
-        if len(tags_by_category) == 0:
-            logger.warning(f"NO CATEGORIES FOUND! First tag sample: {tags[0] if tags else 'NO TAGS'}")
         
-        category_order = ['Topic', 'Persona', 'Tone', 'Format', 'Audience', 'Unknown']
-        for category in category_order:
-            if category not in tags_by_category:
-                continue
-            
+        # Map Hebrew category names to English display names
+        category_display = {
+            'נושא': 'Topic (נושא)',
+            'פרסונה': 'Persona (פרסונה)',
+            'טון': 'Tone (טון)',
+            'פורמט': 'Format (פורמט)',
+            'קהל יעד': 'Audience (קהל יעד)',
+            # Also support English categories for backward compatibility
+            'Topic': 'Topic (נושא)',
+            'Persona': 'Persona (פרסונה)',
+            'Tone': 'Tone (טון)',
+            'Format': 'Format (פורמט)',
+            'Audience': 'Audience (קהל יעד)',
+            'Unknown': 'Other'
+        }
+        
+        # Render all categories that were found
+        for category in tags_by_category.keys():
             category_tags = tags_by_category[category]
-            prompt_parts.append(f"### {category}\n")
+            display_name = category_display.get(category, category)
+            prompt_parts.append(f"### {display_name}\n")
             
             for tag in category_tags:
                 # Show tag name first since that's what LLM will use
