@@ -32,6 +32,8 @@ The API supports four scoring modes, balancing quality, speed, and cost:
 -   **Stateless Design**: All lecture/label data is provided via API payloads.
 -   **PostgreSQL Storage**: Prototypes are stored in PostgreSQL, enabling versioning and visibility.
 -   **In-memory Caching**: Pre-computed prototypes are cached in memory for fast suggestion responses.
+-   **Forced GPT-4o Model**: System hardcoded to use GPT-4o (not mini) for superior instruction-following and exact tag name matching. All 115 tags are passed to the LLM in reasoning/ensemble modes.
+-   **Exact Tag Matching Prompts**: LLM prompts include explicit Hebrew examples of wrong behavior (missing ה prefix like "חברה ישראלית" vs "החברה הישראלית", invented tags like "עיתונאות" vs "מדיה ותקשורת") to enforce character-by-character matching.
 -   **Lecturer Bio Enrichment**: In reasoning and ensemble modes, GPT-4o is used to search, validate, and cache lecturer bios in PostgreSQL (`lecturer_bios` table) to enrich LLM prompts and improve accuracy.
 -   **Category-Aware Prompting**: LLM prompts include explicit definitions for 5 tag categories (Topic, Persona, Tone, Format, Audience) and organize tags by category for improved context understanding. Structure supports future category-specific instructions.
 -   **Structured Logging**: Uses structured JSON logging with `request_id` correlation, performance metrics, business metrics, and error context for observability.

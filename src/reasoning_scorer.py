@@ -1,23 +1,43 @@
 import logging
 import time
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Literal, get_args
 from openai import OpenAI
 import json
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, create_model
 from src.logging_utils import StructuredLogger, track_operation, _request_context
 from src.ai_call_logger import AICallLogger
 
 logger = StructuredLogger(__name__)
 ai_call_logger = AICallLogger()
 
-class TagSuggestion(BaseModel):
-    tag_name_he: str  # LLM only returns the Hebrew name
-    confidence: float
-    rationale_he: str
-
-class TaggingResponse(BaseModel):
-    suggestions: List[TagSuggestion]
-    reasoning_summary: str
+def create_constrained_tag_model(tag_names: List[str]):
+    """
+    Dynamically create a Pydantic model with tag_name_he constrained to exact tag names.
+    This forces the LLM to only return exact matches from the provided list.
+    """
+    from enum import Enum
+    
+    # Create Enum with safe member names (sequential IDs) and tag names as values
+    # Example: tag_0 = "החברה הישראלית", tag_1 = "מדיה ותקשורת", etc.
+    enum_dict = {f'tag_{i}': name for i, name in enumerate(tag_names)}
+    TagNameEnum = Enum('TagNameEnum', enum_dict)
+    
+    # Create TagSuggestion model with constrained tag_name_he
+    TagSuggestion = create_model(
+        'TagSuggestion',
+        tag_name_he=(TagNameEnum, Field(description="Exact tag name from the provided list")),
+        confidence=(float, Field(description="Confidence score 0.0-1.0")),
+        rationale_he=(str, Field(description="Hebrew rationale for why this tag fits"))
+    )
+    
+    # Create TaggingResponse model
+    TaggingResponse = create_model(
+        'TaggingResponse',
+        suggestions=(List[TagSuggestion], Field(description="List of tag suggestions")),
+        reasoning_summary=(str, Field(description="Hebrew summary of reasoning process"))
+    )
+    
+    return TaggingResponse
 
 class ReasoningScorer:
     def __init__(self, model: str = "gpt-4o", min_confidence: float = 0.80, confidence_scale: float = 0.85):
@@ -43,6 +63,12 @@ class ReasoningScorer:
         tags_to_consider = candidate_tags if candidate_tags and len(candidate_tags) > 0 else all_tags
         
         logger.debug(f"Considering {len(tags_to_consider)} tags for lecture {lecture.get('id')}")
+        
+        # Extract tag names for enum constraint
+        tag_names = [tag.get('name_he', '') for tag in tags_to_consider if tag.get('name_he')]
+        
+        # Create constrained response model
+        TaggingResponse = create_constrained_tag_model(tag_names)
         
         prompt = self._build_prompt(lecture, tags_to_consider, lecturer_profile)
         
@@ -152,7 +178,7 @@ class ReasoningScorer:
                 response_content = {
                     'suggestions': [
                         {
-                            'tag_name_he': sugg.tag_name_he,
+                            'tag_name_he': sugg.tag_name_he.value if hasattr(sugg.tag_name_he, 'value') else str(sugg.tag_name_he),
                             'confidence': sugg.confidence,
                             'rationale_he': sugg.rationale_he
                         }
@@ -198,8 +224,14 @@ class ReasoningScorer:
             
             formatted_suggestions = []
             for sugg in result.suggestions:
-                # Map tag_name_he -> tag_id using our mapping
-                tag_name = sugg.tag_name_he.strip()
+                # Extract tag name (handle Enum values)
+                tag_name_raw = sugg.tag_name_he
+                if hasattr(tag_name_raw, 'value'):
+                    # It's an Enum
+                    tag_name = tag_name_raw.value
+                else:
+                    # It's a string
+                    tag_name = str(tag_name_raw).strip()
                 
                 if tag_name not in name_to_tag:
                     logger.warning(
