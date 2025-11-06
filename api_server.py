@@ -1487,7 +1487,7 @@ def train_ui():
                         message.style.display = 'block';
                         message.innerHTML = `
                             <strong>✅ Training Initiated Successfully!</strong><br><br>
-                            ✅ Data was successfully fetched from the external API (${result.num_tags || 0} labels, ${result.num_lectures || 0} lectures)<br>
+                            ✅ Data was successfully fetched from the external API (${result.num_tags || 0} labels, ${result.num_lectures || 0} lectures, ${result.num_lecture_labels || 0} lecture-label couples)<br>
                             ✅ Background training started and is progressing (embeddings are being generated)<br><br>
                             The model will be updated automatically when training completes. This may take a few minutes.
                         `;
@@ -2013,7 +2013,8 @@ def get_data_and_train():
         return jsonify({
             'status': 'training initiated',
             'num_lectures': len(training_data.get('lectures', [])),
-            'num_tags': len(training_data.get('tags', {}))
+            'num_tags': len(training_data.get('tags', {})),
+            'num_lecture_labels': len(api_data.get('lecture_labels', []))
         }), 202
         
     except requests.RequestException as e:
