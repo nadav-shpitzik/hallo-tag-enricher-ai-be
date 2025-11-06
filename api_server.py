@@ -1463,7 +1463,7 @@ def train_ui():
                     message.innerHTML = `<strong>❌ Error:</strong> ${error.message}`;
                 } finally {
                     submitBtn.disabled = false;
-                    submitBtn.innerHTML = 'Upload CSV & Train Model';
+                    submitBtn.innerHTML = 'Train Model';
                 }
             });
             
@@ -1599,7 +1599,7 @@ def index():
             <div class="status """ + ("loaded" if prototypes_loaded else "not-loaded") + """">
                 """ + ("✓ Prototypes Loaded: " + str(len(prototype_knn.tag_prototypes)) if prototypes_loaded else "⚠ No Prototypes - Train First") + """
             </div>
-            <a href="/train-ui" class="cta-button">🎓 Upload CSV & Train Model</a>
+            <a href="/train-ui" class="cta-button">🎓 Train Model Page</a>
         </div>
 
         <h2>📋 API Endpoints</h2>
