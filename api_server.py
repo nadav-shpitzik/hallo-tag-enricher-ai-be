@@ -1313,6 +1313,54 @@ def train_ui():
                 color: #718096;
                 margin-top: 5px;
             }
+            .divider {
+                display: flex;
+                align-items: center;
+                text-align: center;
+                margin: 30px 0;
+                color: #718096;
+                font-size: 14px;
+            }
+            .divider::before,
+            .divider::after {
+                content: '';
+                flex: 1;
+                border-bottom: 1px solid #cbd5e0;
+            }
+            .divider:not(:empty)::before {
+                margin-right: 15px;
+            }
+            .divider:not(:empty)::after {
+                margin-left: 15px;
+            }
+            .btn-secondary {
+                width: 100%;
+                padding: 14px;
+                background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: transform 0.2s, box-shadow 0.2s;
+            }
+            .btn-secondary:hover:not(:disabled) {
+                transform: translateY(-2px);
+                box-shadow: 0 10px 20px rgba(72, 187, 120, 0.4);
+            }
+            .btn-secondary:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+            }
+            .info-box {
+                background: #edf2f7;
+                padding: 15px;
+                border-radius: 8px;
+                margin-bottom: 15px;
+                font-size: 14px;
+                color: #4a5568;
+            }
         </style>
     </head>
     <body>
@@ -1337,9 +1385,20 @@ def train_ui():
                 </div>
                 
                 <button type="submit" class="btn" id="submitBtn">
-                    Train Model
+                    Upload CSV & Train Model
                 </button>
             </form>
+            
+            <div class="divider">OR</div>
+            
+            <div class="info-box">
+                <strong>🔄 Auto-Fetch Training Data</strong><br>
+                Automatically fetch the latest training data from the external API and start training in the background.
+            </div>
+            
+            <button type="button" class="btn-secondary" id="autoFetchBtn">
+                🚀 Fetch Data & Train
+            </button>
             
             <div id="message" class="message"></div>
         </div>
@@ -1347,6 +1406,7 @@ def train_ui():
         <script>
             const form = document.getElementById('uploadForm');
             const submitBtn = document.getElementById('submitBtn');
+            const autoFetchBtn = document.getElementById('autoFetchBtn');
             const message = document.getElementById('message');
             
             form.addEventListener('submit', async (e) => {
@@ -1403,7 +1463,44 @@ def train_ui():
                     message.innerHTML = `<strong>❌ Error:</strong> ${error.message}`;
                 } finally {
                     submitBtn.disabled = false;
-                    submitBtn.innerHTML = 'Train Model';
+                    submitBtn.innerHTML = 'Upload CSV & Train Model';
+                }
+            });
+            
+            autoFetchBtn.addEventListener('click', async () => {
+                autoFetchBtn.disabled = true;
+                autoFetchBtn.innerHTML = '<span class="spinner"></span>Fetching data...';
+                message.style.display = 'none';
+                
+                try {
+                    const response = await fetch('/get-data-and-train', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok) {
+                        message.className = 'message success';
+                        message.style.display = 'block';
+                        message.innerHTML = `
+                            <strong>✅ Training Initiated Successfully!</strong><br><br>
+                            ✅ Data was successfully fetched from the external API (${result.num_tags || 0} labels, ${result.num_lectures || 0} lectures)<br>
+                            ✅ Background training started and is progressing (embeddings are being generated)<br><br>
+                            The model will be updated automatically when training completes. This may take a few minutes.
+                        `;
+                    } else {
+                        throw new Error(result.error || 'Failed to fetch and train');
+                    }
+                } catch (error) {
+                    message.className = 'message error';
+                    message.style.display = 'block';
+                    message.innerHTML = `<strong>❌ Error:</strong> ${error.message}`;
+                } finally {
+                    autoFetchBtn.disabled = false;
+                    autoFetchBtn.innerHTML = '🚀 Fetch Data & Train';
                 }
             });
         </script>

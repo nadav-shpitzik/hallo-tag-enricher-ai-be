@@ -27,7 +27,10 @@ The API supports four scoring modes, balancing quality, speed, and cost:
 -   **Suggestion Flow**: Client sends lectures, API loads/caches prototypes, generates embeddings, scores lectures using the selected scoring mode, and returns suggestions.
 
 ### UI/UX Decisions
--   A web interface (`/train-ui`) is provided for user-friendly CSV upload and model training, featuring a gradient design and real-time progress tracking.
+-   A web interface (`/train-ui`) is provided for user-friendly model training with two options:
+    - **CSV Upload**: Manual upload of three CSV files (lectures, labels, lecture_labels) with real-time progress tracking
+    - **Auto-Fetch Button**: One-click button to automatically fetch latest training data from external API and initiate background training
+-   The interface features a gradient design, clear visual separation between training methods, and informative success messages showing fetched data counts and training progress.
 
 ### Technical Implementations
 -   **Stateless Design**: All lecture/label data is provided via API payloads.
