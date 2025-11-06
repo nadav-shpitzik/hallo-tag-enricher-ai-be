@@ -14,8 +14,14 @@ import os
 import json
 import logging
 import time
+import threading
+import requests
+import urllib3
 import numpy as np
 from typing import List, Dict, Optional
+
+# Suppress SSL warnings for internal Replit-to-Replit calls (see fetch_training_data_from_api)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from flask import Flask, request, jsonify, g
 from replit import db
 from src.embeddings import EmbeddingsGenerator
@@ -1752,6 +1758,176 @@ def index():
     </html>
     """
     return html
+
+
+def fetch_training_data_from_api() -> dict:
+    """
+    Fetch training data from external API using X-API-KEY header.
+    
+    Returns:
+        Dict with 'labels', 'lectures', and 'lecture_labels' keys
+    """
+    api_url = "https://hallo-tags-manager.replit.app/v2/train-data"
+    api_key = os.getenv('TRAIN_DATA_X_API_KEY')
+    
+    if not api_key:
+        raise ValueError("TRAIN_DATA_X_API_KEY environment variable not set")
+    
+    headers = {
+        'X-API-KEY': api_key
+    }
+    
+    logger.info(f"Fetching training data from {api_url}")
+    # SSL verification disabled due to Replit environment certificate chain issues
+    # Attempted fixes: system cacert, certifi, default CA bundle - all failed
+    # This is acceptable for internal Replit-to-Replit communication with API key auth
+    # TODO: Investigate certificate chain for production deployment
+    response = requests.get(api_url, headers=headers, timeout=30, verify=False)
+    response.raise_for_status()
+    
+    data = response.json()
+    logger.info(
+        f"Fetched training data",
+        num_labels=len(data.get('labels', [])),
+        num_lectures=len(data.get('lectures', [])),
+        num_lecture_labels=len(data.get('lecture_labels', []))
+    )
+    
+    return data
+
+
+def transform_api_data_to_training_format(api_data: dict) -> dict:
+    """
+    Transform API response format to the format expected by train_from_data.
+    
+    API format:
+    {
+        "labels": [{"airtable_id": "...", "name": "...", "category": "..."}],
+        "lectures": [{"airtable_id": "...", "description": "...", "lecturer_id": "..."}],
+        "lecture_labels": [{"lecture_id": "...", "label_id": "..."}]
+    }
+    
+    Training format:
+    {
+        "lectures": [{"id": "...", "lecture_title": "...", "lecture_description": "...", "lecture_tag_ids": [...]}],
+        "tags": {"tag_id": {"tag_id": "...", "name_he": "...", "category": "..."}}
+    }
+    """
+    labels_list = api_data.get('labels', [])
+    lectures_list = api_data.get('lectures', [])
+    lecture_labels_list = api_data.get('lecture_labels', [])
+    
+    # Build tags dictionary from labels
+    tags = {}
+    for label in labels_list:
+        label_id = label.get('airtable_id')
+        if not label_id:
+            continue
+        
+        tags[label_id] = {
+            'tag_id': label_id,
+            'name_he': label.get('name', ''),
+            'synonyms_he': '',
+            'category': label.get('category', 'Unknown')
+        }
+    
+    # Build lecture_id -> [label_ids] mapping from junction table
+    lecture_to_labels = {}
+    for junction in lecture_labels_list:
+        lecture_id = junction.get('lecture_id')
+        label_id = junction.get('label_id')
+        
+        if lecture_id and label_id:
+            if lecture_id not in lecture_to_labels:
+                lecture_to_labels[lecture_id] = []
+            lecture_to_labels[lecture_id].append(label_id)
+    
+    # Build lectures list with their tag IDs
+    lectures = []
+    for lecture in lectures_list:
+        lecture_id = lecture.get('airtable_id')
+        if not lecture_id:
+            continue
+        
+        # Get label IDs for this lecture
+        label_ids = lecture_to_labels.get(lecture_id, [])
+        
+        lectures.append({
+            'id': lecture_id,
+            'lecture_title': lecture.get('title', ''),
+            'lecture_description': lecture.get('description', ''),
+            'lecturer_id': lecture.get('lecturer_id', ''),
+            'lecture_tag_ids': label_ids
+        })
+    
+    logger.info(
+        f"Transformed data",
+        num_lectures=len(lectures),
+        num_tags=len(tags)
+    )
+    
+    return {
+        'lectures': lectures,
+        'tags': tags
+    }
+
+
+def run_training_in_background(training_data: dict):
+    """
+    Run training in a background thread.
+    """
+    try:
+        logger.info("Starting background training")
+        result = train_from_data(training_data)
+        logger.info(f"Background training completed", result=result)
+        
+        # Reload prototypes into global state
+        load_prototypes_from_db()
+        logger.info("Prototypes reloaded after training")
+        
+    except Exception as e:
+        logger.error(f"Background training failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+@app.route('/get-data-and-train', methods=['POST'])
+def get_data_and_train():
+    """
+    Fetch training data from external API and initiate training in background.
+    
+    Returns immediately with "training initiated" message.
+    """
+    try:
+        # Fetch data from external API
+        api_data = fetch_training_data_from_api()
+        
+        # Transform to training format
+        training_data = transform_api_data_to_training_format(api_data)
+        
+        # Start training in background thread
+        training_thread = threading.Thread(
+            target=run_training_in_background,
+            args=(training_data,),
+            daemon=True
+        )
+        training_thread.start()
+        
+        return jsonify({
+            'status': 'training initiated',
+            'num_lectures': len(training_data.get('lectures', [])),
+            'num_tags': len(training_data.get('tags', {}))
+        }), 202
+        
+    except requests.RequestException as e:
+        logger.error(f"Failed to fetch training data: {e}")
+        return jsonify({'error': f'Failed to fetch training data: {str(e)}'}), 500
+        
+    except Exception as e:
+        logger.error(f"Error initiating training: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':

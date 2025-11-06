@@ -4,7 +4,7 @@ expertMode = true
 
 [nix]
 channel = "stable-25_05"
-packages = ["glibcLocales"]
+packages = ["cacert", "glibcLocales"]
 
 [workflows]
 runButton = "Project"

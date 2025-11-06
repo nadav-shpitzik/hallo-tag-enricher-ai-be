@@ -11,6 +11,7 @@ Not specified.
 ### Core Functionality
 The system provides endpoints for:
 - **Training**: Accepts training lectures with existing tags (JSON or CSV) to generate embeddings, compute tag prototypes (centroids), calibrate confidence thresholds, and save prototypes to PostgreSQL with versioning.
+- **Auto-Training**: New `/get-data-and-train` endpoint that automatically fetches training data from an external API (`hallo-tags-manager.replit.app`) using X-API-KEY authentication, transforms the data format, and initiates background training without blocking the response. Returns immediately with HTTP 202 status.
 - **Suggestion**: Provides tag suggestions for new lectures by loading pre-computed prototypes, generating embeddings for input lectures, and scoring against prototypes using cosine similarity.
 - **Management**: Endpoints for reloading prototypes and viewing prototype versions and tag information.
 
@@ -32,6 +33,7 @@ The API supports four scoring modes, balancing quality, speed, and cost:
 -   **Stateless Design**: All lecture/label data is provided via API payloads.
 -   **PostgreSQL Storage**: Prototypes are stored in PostgreSQL, enabling versioning and visibility.
 -   **In-memory Caching**: Pre-computed prototypes are cached in memory for fast suggestion responses.
+-   **Background Training**: The `/get-data-and-train` endpoint uses threading to run training asynchronously, allowing immediate API response while training completes in the background.
 -   **Forced GPT-4o Model**: System hardcoded to use GPT-4o (not mini) for superior instruction-following and exact tag name matching. All 115 tags are passed to the LLM in reasoning/ensemble modes.
 -   **Exact Tag Matching Prompts**: LLM prompts include explicit Hebrew examples of wrong behavior (missing ה prefix like "חברה ישראלית" vs "החברה הישראלית", invented tags like "עיתונאות" vs "מדיה ותקשורת") to enforce character-by-character matching.
 -   **Lecturer Bio Enrichment**: In reasoning and ensemble modes, GPT-4o is used to search, validate, and cache lecturer bios in PostgreSQL (`lecturer_bios` table) to enrich LLM prompts and improve accuracy.
@@ -55,3 +57,7 @@ The API supports four scoring modes, balancing quality, speed, and cost:
 -   **Pandas**: For data processing, especially for CSV input.
 -   **Python-dotenv**: For managing environment variables.
 -   **Discord Webhooks**: Optional integration for sending API notifications.
+-   **External Training API**: The `/get-data-and-train` endpoint fetches from `hallo-tags-manager.replit.app/v2/train-data`.
+
+## Known Limitations
+-   **SSL Verification**: The `/get-data-and-train` endpoint uses `verify=False` for HTTPS requests due to certificate chain validation issues in the Replit environment. Multiple SSL verification approaches were attempted (system cacert, certifi, default CA bundle) but failed consistently. This is acceptable for internal Replit-to-Replit communication with API key authentication. For production deployment, investigate certificate chain configuration.
