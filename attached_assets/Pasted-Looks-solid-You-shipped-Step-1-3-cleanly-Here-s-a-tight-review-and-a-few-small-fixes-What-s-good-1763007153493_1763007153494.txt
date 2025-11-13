@@ -1,0 +1,46 @@
+Looks solid. You shipped Step 1–3 cleanly. Here’s a tight review and a few small fixes.
+
+What’s good
+
+Five per-category prompts with strict JSON parsing and ID whitelisting. Parallelized and telemetry logged.
+
+Reasoning scorer wraps the category flow, keeps all picks, clamps scores, and logs AI-call usage.
+
+Ensemble combiner has backfill + guarded agreement bonus, and filters prototype-only tags below threshold. Telemetry logs top-3.
+
+NDJSON telemetry helper is thread-safe and creates the log dir.
+
+Analyzer and sampler match the telemetry schema and give the exact KPIs we wanted. Usage doc is clear.
+
+README/overview reflects the new per-category reasoning + smart ensemble.
+
+Nits to fix (quick)
+
+Model name in category telemetry
+You hardcode "model": "gpt-4o" in category logs. Use the actual model from the caller so logs stay truthful. Change in category_reasoning.process_category(...).
+Fix: pass the model string into run_per_category_reasoning(...) and log it.
+
+Uniq + stable order of chosen_ids
+If the LLM repeats an id, you’ll propagate duplicates. After parsing, unique while preserving order. In parse_category_json(...).
+
+seen=set(); chosen=[x for x in data.get("chosen_ids", []) if x in allowed_ids and (x not in seen and not seen.add(x))]
+
+
+Top-K guard in ensemble
+You slice [:self.config.top_k_tags]. Make sure top_k_tags is present (or default to a safe number) to avoid an AttributeError.
+
+k = getattr(self.config, "top_k_tags", 50)
+final_suggestions = combined_suggestions[:k]
+
+
+Backfill trigger note
+Your combiner backfills when reasoning is empty (good). The analyzer’s “backfill rate” reads the flag from ensemble logs, so you’re consistent. Just confirming intent.
+
+Legacy _build_prompt
+It’s unused in the new path; mark as deprecated or remove to avoid confusion.
+
+Confidence scale/gate
+You set min_confidence=0.0, confidence_scale=1.0 (good). Keep it that way so ensemble owns the gating.
+
+Category thresholds source
+Ensemble uses config.category_thresholds for prototype thresholds; ensure all five categories have entries plus default.
