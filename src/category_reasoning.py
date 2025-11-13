@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from typing import Dict, List, Any, Optional, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from src.telemetry import log_line
+
 logger = logging.getLogger(__name__)
 
 CATEGORIES = ["Topic", "Persona", "Audience", "Tone", "Format"]
@@ -262,6 +264,18 @@ def run_per_category_reasoning(
         result = parse_category_json(raw, allowed, category)
         
         logger.info(f"Category {category} selected {len(result.chosen_ids)} tags")
+        
+        # Log telemetry for this category result
+        lecture_id = lecture.get("id") or lecture.get("lecture_id")
+        log_line({
+            "kind": "category_reasoning_result",
+            "lecture_id": lecture_id,
+            "category": category,
+            "model": "gpt-4o",
+            "chosen_ids": result.chosen_ids,
+            "confidence": result.confidence,
+            "rationales_count": len(result.rationales or {})
+        })
         
         return category, result
     
