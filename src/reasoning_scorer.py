@@ -273,100 +273,26 @@ class ReasoningScorer:
             )
             return []
     
+    # DEPRECATED: Legacy prompt builder for old single-prompt approach
+    # This is no longer used - we now use per-category reasoning in category_reasoning.py
+    # Kept for reference only. Remove in future cleanup.
     def _build_prompt(
         self,
         lecture: Dict,
         tags: List[Dict],
         lecturer_profile: Optional[str]
     ) -> str:
-        prompt_parts = []
+        """
+        DEPRECATED: This method is no longer used.
         
-        prompt_parts.append("# הרצאה לתיוג\n")
-        prompt_parts.append(f"**כותרת:** {lecture.get('lecture_title', 'לא צוין')}\n")
+        The system now uses per-category reasoning (5 focused prompts)
+        instead of one large prompt with all tags mixed together.
         
-        if lecture.get('lecture_description'):
-            prompt_parts.append(f"**תיאור:** {lecture['lecture_description']}\n")
-        
-        if lecture.get('lecturer_name'):
-            prompt_parts.append(f"**מרצה:** {lecture['lecturer_name']}\n")
-            
-            if lecturer_profile:
-                prompt_parts.append(f"**רקע על המרצה:** {lecturer_profile}\n")
-        
-        prompt_parts.append(f"\n# תגיות זמינות ({len(tags)} אופציות)\n")
-        prompt_parts.append("התגיות מקובצות לפי קטגוריה:\n\n")
-        
-        tags_by_category = {}
-        for tag in tags:
-            category = tag.get('category', 'Unknown')
-            if category not in tags_by_category:
-                tags_by_category[category] = []
-            tags_by_category[category].append(tag)
-        
-        # Debug logging to see what categories were found
-        logger.info(f"Tags by category: {list(tags_by_category.keys())}, total tags: {len(tags)}")
-        
-        # Map Hebrew category names to English display names
-        category_display = {
-            'נושא': 'Topic (נושא)',
-            'פרסונה': 'Persona (פרסונה)',
-            'טון': 'Tone (טון)',
-            'פורמט': 'Format (פורמט)',
-            'קהל יעד': 'Audience (קהל יעד)',
-            # Also support English categories for backward compatibility
-            'Topic': 'Topic (נושא)',
-            'Persona': 'Persona (פרסונה)',
-            'Tone': 'Tone (טון)',
-            'Format': 'Format (פורמט)',
-            'Audience': 'Audience (קהל יעד)',
-            'Unknown': 'Other'
-        }
-        
-        # Render all categories that were found
-        for category in tags_by_category.keys():
-            category_tags = tags_by_category[category]
-            display_name = category_display.get(category, category)
-            prompt_parts.append(f"### {display_name}\n")
-            
-            for tag in category_tags:
-                # Show tag name first since that's what LLM will use
-                tag_line = f"- **{tag.get('name_he', '')}**"
-                if tag.get('synonyms_he'):
-                    tag_line += f" (שמות נוספים: {tag['synonyms_he']})"
-                prompt_parts.append(tag_line + "\n")
-            
-            prompt_parts.append("\n")
-        
-        prompt_parts.append("\n# משימה\n")
-        prompt_parts.append("על בסיס תוכן ההרצאה והרקע על המרצה, הצע תגיות מתאימות **מתוך רשימת התגיות שסופקה בלבד**.\n\n")
-        prompt_parts.append("לכל תגית ציין:\n")
-        prompt_parts.append("1. שם התגית בעברית (**העתק בדיוק** מהרשימה למעלה)\n")
-        prompt_parts.append("2. רמת ביטחון (0.0-1.0)\n")
-        prompt_parts.append("3. נימוק בעברית למה התגית מתאימה\n\n")
-        
-        prompt_parts.append("## פורמט פלט נדרש (דוגמה)\n")
-        prompt_parts.append('```json\n')
-        prompt_parts.append('{\n')
-        prompt_parts.append('  "suggestions": [\n')
-        prompt_parts.append('    {\n')
-        prompt_parts.append('      "tag_name_he": "בריאות הנפש",\n')
-        prompt_parts.append('      "confidence": 0.88,\n')
-        prompt_parts.append('      "rationale_he": "נימוק מפורט בעברית למה התגית מתאימה להרצאה זו"\n')
-        prompt_parts.append('    }\n')
-        prompt_parts.append('  ],\n')
-        prompt_parts.append('  "reasoning_summary": "בהתבסס על התוכן, נבחרו תגיות עם קשר ברור לנושא המרכזי."\n')
-        prompt_parts.append('}\n')
-        prompt_parts.append('```\n\n')
-        prompt_parts.append("## ⚠️ לפני שליחת התשובה - בדוק שנית!\n")
-        prompt_parts.append("**חובה:** ודא שכל שם תגית מועתק **תו-תו** מהרשימה למעלה.\n\n")
-        prompt_parts.append("טעויות נפוצות שצריך להימנע מהן:\n")
-        prompt_parts.append("- ❌ אל תשמיט את ה' הידיעה (דוגמה: \"חברה ישראלית\" במקום \"החברה הישראלית\")\n")
-        prompt_parts.append("- ❌ אל תמציא תגיות חדשות (דוגמה: \"עיתונאות\" כשיש \"מדיה ותקשורת\")\n")
-        prompt_parts.append("- ❌ אל תשנה רווחים או סימנים (דוגמה: \"בריאות-הנפש\" במקום \"בריאות הנפש\")\n")
-        prompt_parts.append("- ✅ העתק **בדיוק** כמו שמופיע ברשימה\n\n")
-        prompt_parts.append("המערכת תשייך את ה-ID אוטומטית לפי השם שתציין.\n")
-        
-        return "".join(prompt_parts)
+        See category_reasoning.py for the new implementation.
+        """
+        raise NotImplementedError(
+            "_build_prompt is deprecated. Use category_reasoning module instead."
+        )
     
     def score_batch(
         self,
