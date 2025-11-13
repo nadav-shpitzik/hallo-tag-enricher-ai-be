@@ -1,0 +1,52 @@
+Confidence gate is too strict
+You scale confidences by 0.85 and then require ≥ 0.80. That means the raw LLM confidence must be ≥ 0.941 to pass (0.941 * 0.85 ≈ 0.80). You’ll drop most good tags. For MVP, don’t filter here—let the ensemble + prototype thresholds do the gating. Fix = set confidence_scale=1.0 and min_confidence=0.0.
+
+Field name for ensemble
+Your suggestions carry tag_id, but many downstream paths expect label_id. Normalize before combining to avoid silent misses. (If your combiner already handles tag_id, ignore this; otherwise map.)
+
+Everything else looks fine: category prompts are clear, ID lists are validated against allowed_ids, synonyms parsing handles both string and list, and the parallel executor defends each category call.
+
+Minimal patches
+A) Keep all tags (no filtering) and clamp the score
+
+In ReasoningScorer.__init__:
+
+def __init__(self, model: str = "gpt-4o", min_confidence: float = 0.0, confidence_scale: float = 1.0):
+    ...
+
+
+In score_lecture(...), replace the filtering block with a no-drop pass-through:
+
+formatted_suggestions = []
+for sugg in raw_suggestions:
+    # keep raw score; clamp to [0,1]
+    calibrated = max(0.0, min(1.0, sugg['score']))
+    formatted_suggestions.append({
+        'tag_id': sugg['tag_id'],                # or map to label_id here if needed
+        'tag_name_he': sugg['tag_name_he'],
+        'score': calibrated,
+        'rationale': sugg['rationale'],
+        'category': sugg['category'],
+        'model': f'category_reasoning:{self.model}'
+    })
+
+
+(This removes the >= self.min_confidence drop.)
+
+B) (Optional) Map to label_id for the ensemble combiner
+
+Right after building formatted_suggestions:
+
+for s in formatted_suggestions:
+    s['label_id'] = s.pop('tag_id')  # if your ensemble expects label_id
+
+
+(If your ensemble_scorer already accepts tag_id, skip.)
+
+Sanity checks (no code change)
+
+Lecturer bio type: your category prompt expects a string bio; be sure callers pass text (not a dict). Your category builder already accepts Optional[str].
+
+Time/out behavior: exceptions per category are caught and return an empty result, so one failed call won’t block the others. Good.
+
+If you make those two tiny changes, Step 1 is good to go.

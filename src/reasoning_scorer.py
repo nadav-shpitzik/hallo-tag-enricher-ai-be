@@ -27,11 +27,11 @@ class TaggingResponse(BaseModel):
     reasoning_summary: str = Field(description="Hebrew summary of reasoning process")
 
 class ReasoningScorer:
-    def __init__(self, model: str = "gpt-4o", min_confidence: float = 0.80, confidence_scale: float = 0.85):
+    def __init__(self, model: str = "gpt-4o", min_confidence: float = 0.0, confidence_scale: float = 1.0):
         self.client = OpenAI()
         self.model = model
         self.min_confidence = min_confidence
-        self.confidence_scale = confidence_scale  # Calibration factor for over-confident LLMs
+        self.confidence_scale = confidence_scale  # No longer filtering - let ensemble handle it
         
         # Create name -> tag mapping for all tags (populated in score_lecture)
         self.name_to_tag = {}
@@ -190,22 +190,20 @@ class ReasoningScorer:
             
             raw_suggestions = category_results_to_suggestions(category_results, tags_data)
             
-            # Apply confidence calibration and filtering
+            # Keep all tags - let ensemble scorer handle filtering
             formatted_suggestions = []
             for sugg in raw_suggestions:
-                # Apply confidence calibration (LLMs tend to be over-confident)
-                calibrated_confidence = sugg['score'] * self.confidence_scale
+                # Keep raw score, just clamp to [0,1]
+                calibrated = max(0.0, min(1.0, sugg['score']))
                 
-                # Only include if calibrated confidence meets threshold
-                if calibrated_confidence >= self.min_confidence:
-                    formatted_suggestions.append({
-                        'tag_id': sugg['tag_id'],
-                        'tag_name_he': sugg['tag_name_he'],
-                        'score': calibrated_confidence,
-                        'rationale': sugg['rationale'],
-                        'category': sugg['category'],
-                        'model': f'category_reasoning:{self.model}'
-                    })
+                formatted_suggestions.append({
+                    'tag_id': sugg['tag_id'],
+                    'tag_name_he': sugg['tag_name_he'],
+                    'score': calibrated,
+                    'rationale': sugg['rationale'],
+                    'category': sugg['category'],
+                    'model': f'category_reasoning:{self.model}'
+                })
             
             # Log AI calls to database (aggregate all 5 category calls)
             response_content = {
