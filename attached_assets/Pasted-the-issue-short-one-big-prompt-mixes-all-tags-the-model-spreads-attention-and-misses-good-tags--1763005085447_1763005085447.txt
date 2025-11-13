@@ -1,0 +1,168 @@
+the issue (short)
+
+one big prompt mixes all tags. the model spreads attention and misses good tags.
+
+prototype is weak for long-tail labels.
+
+result: good precision, but recall is uneven.
+
+the change (short)
+
+run five small prompts. one per category: Topic, Persona, Audience, Tone, Format.
+
+each prompt gets all tags of that category (no candidates).
+
+return JSON: chosen_ids, confidence, rationales.
+
+then you can merge with the existing ensemble (same weights).
+
+step 1 — per-category reasoning (snippets)
+
+add a small module, e.g. category_reasoning.py. wire it in your suggest flow after you have lecture, labels, and optional lecturer_profile.
+
+1) data types and grouping
+# category_reasoning.py
+from dataclasses import dataclass
+from typing import Dict, List, Any
+import json
+import re
+
+CATEGORIES = ["Topic", "Persona", "Audience", "Tone", "Format"]
+
+@dataclass
+class CategoryResult:
+    category: str
+    chosen_ids: List[str]
+    confidence: Dict[str, float]
+    rationales: Dict[str, str]
+
+def group_labels_by_category(labels: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    labels: list of dicts with keys: tag_id, name_he, synonyms_he, category
+    """
+    buckets = {c: [] for c in CATEGORIES}
+    for lb in labels:
+        cat = lb.get("category")
+        if cat in buckets:
+            syns = lb.get("synonyms_he") or ""
+            syn_list = [s.strip() for s in syns.split(",") if s.strip()]
+            buckets[cat].append({
+                "tag_id": lb["tag_id"],
+                "name_he": lb.get("name_he", ""),
+                "synonyms_he": syn_list,
+            })
+    return buckets
+
+2) prompts (Hebrew, short, one per category)
+SYSTEM_PROMPTS_HE = {
+    "Topic":   "אתה מסווג נושאים להרצאות. החזר JSON בלבד לפי הסכמה. בחר רק תגים שמתאימים לתוכן. אם אין, החזר רשימה ריקה.",
+    "Persona": "אתה מסווג פרסונה של המרצה. החזר JSON בלבד. אל תנחש. אפשר גם ריק.",
+    "Audience":"אתה מסווג קהל יעד להרצאה. החזר JSON בלבד. בחר רק אם יש סימנים ברורים.",
+    "Tone":    "אתה מסווג טון (סגנון). החזר JSON בלבד. דלג אם לא ברור.",
+    "Format":  "אתה מסווג פורמט ההרצאה. החזר JSON בלבד. אם אין רמז ברור, החזר ריק."
+}
+
+def build_user_prompt_he(lecture: Dict[str, Any],
+                         lecturer_profile: Dict[str, Any] | None,
+                         category: str,
+                         tags: List[Dict[str, Any]]) -> str:
+    title = lecture.get("title") or lecture.get("lecture_title") or ""
+    desc  = lecture.get("description") or lecture.get("lecture_description") or ""
+    bio   = (lecturer_profile or {}).get("bio") or ""
+    lines = [
+        f"קטגוריה: {category}",
+        f"כותרת: {title}",
+        f"תיאור: {desc}",
+    ]
+    if bio:
+        lines.append(f"ביוגרפיה: {bio}")
+
+    lines.append("רשימת תגים (tag_id, name_he, synonyms_he):")
+    for t in tags:
+        syns = ", ".join(t.get("synonyms_he", [])) if t.get("synonyms_he") else ""
+        lines.append(f"- {t['tag_id']} | {t.get('name_he','')} | [{syns}]")
+
+    lines.append(
+        "החזר JSON בלבד במבנה הבא:\n"
+        "{\n"
+        '  "category": "' + category + '",\n'
+        '  "chosen_ids": ["<tag_id>", "..."],\n'
+        '  "confidence": {"<tag_id>": 0.0},\n'
+        '  "rationales": {"<tag_id>": "הסבר קצר (עד 120 תווים)"}\n'
+        "}"
+    )
+    return "\n".join(lines)
+
+3) model call + strict JSON parse
+# plug this into your existing LLM client; use your most accurate model.
+def call_llm_category(system_text: str, user_text: str, model: str = "best") -> str:
+    """
+    Return the raw model text. Use response_format=json if your client supports it.
+    """
+    # Pseudocode – replace with your client.
+    # return client.chat(model=model, system=system_text, user=user_text, temperature=0.2, response_format="json")
+    raise NotImplementedError
+
+JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
+
+def parse_category_json(raw_text: str, allowed_ids: set[str], category: str) -> CategoryResult:
+    # try direct parse first
+    text = raw_text.strip()
+    try:
+        data = json.loads(text)
+    except Exception:
+        # fallback: last JSON-looking block
+        m = list(JSON_BLOCK.finditer(text))
+        if not m:
+            return CategoryResult(category, [], {}, {})
+        data = json.loads(m[-1].group(0))
+
+    chosen = [tid for tid in data.get("chosen_ids", []) if tid in allowed_ids]
+    conf   = {k: float(v) for k, v in (data.get("confidence") or {}).items() if k in allowed_ids}
+    rats   = {k: str(v) for k, v in (data.get("rationales") or {}).items() if k in allowed_ids}
+    return CategoryResult(category=category, chosen_ids=chosen, confidence=conf, rationales=rats)
+
+4) run all five categories (no candidates, no caps)
+def run_per_category_reasoning(lecture: Dict[str, Any],
+                               all_labels: List[Dict[str, Any]],
+                               lecturer_profile: Dict[str, Any] | None,
+                               model: str = "best") -> Dict[str, CategoryResult]:
+    by_cat = group_labels_by_category(all_labels)
+    out: Dict[str, CategoryResult] = {}
+    for category in CATEGORIES:
+        tags = by_cat.get(category, [])
+        if not tags:
+            out[category] = CategoryResult(category, [], {}, {})
+            continue
+        sys_txt = SYSTEM_PROMPTS_HE[category]
+        usr_txt = build_user_prompt_he(lecture, lecturer_profile, category, tags)
+        raw    = call_llm_category(sys_txt, usr_txt, model=model)
+        allowed = {t["tag_id"] for t in tags}
+        out[category] = parse_category_json(raw, allowed, category)
+    return out
+
+5) integration point (example)
+# inside your suggest flow (e.g., in api_server.py after you build lecturer_profile):
+from category_reasoning import run_per_category_reasoning
+
+cat_results = run_per_category_reasoning(
+    lecture=lecture,                # dict with title/description
+    all_labels=labels,              # list of {tag_id,name_he,synonyms_he,category}
+    lecturer_profile=lecturer_profile,  # dict with bio if you have it
+    model="best"                    # your most accurate model
+)
+
+# turn into reasoning suggestions your ensemble already understands
+reasoning_suggestions = []
+for cat, res in cat_results.items():
+    for tid in res.chosen_ids:
+        reasoning_suggestions.append({
+            "label_id": tid,
+            "category": cat,
+            "confidence": res.confidence.get(tid, 0.0),
+            "reasons": ["per_category_reasoning"],
+            "rationale": res.rationales.get(tid, "")
+        })
+
+# now feed reasoning_suggestions + prototype scores into your existing ensemble combiner
+# final = ensemble_scorer.combine(reasoning_suggestions, prototype_scores, config=...)
