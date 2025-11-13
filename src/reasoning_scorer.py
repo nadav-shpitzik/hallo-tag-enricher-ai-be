@@ -150,7 +150,8 @@ class ReasoningScorer:
                     lecture=lecture,
                     all_labels=tags_to_consider,
                     lecturer_profile=lecturer_profile,
-                    llm_caller=llm_caller_with_tracking
+                    llm_caller=llm_caller_with_tracking,
+                    model=self.model
                 )
             
             # Calculate total metrics

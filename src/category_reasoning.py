@@ -205,8 +205,10 @@ def parse_category_json(
             logger.error(f"Failed to parse JSON for {category}: {e}")
             return CategoryResult(category, [], {}, {})
     
-    # Extract and validate fields
-    chosen = [tid for tid in data.get("chosen_ids", []) if tid in allowed_ids]
+    # Extract and validate fields - deduplicate while preserving order
+    seen = set()
+    chosen = [tid for tid in data.get("chosen_ids", []) 
+              if tid in allowed_ids and tid not in seen and not seen.add(tid)]
     conf = {k: float(v) for k, v in (data.get("confidence") or {}).items() if k in allowed_ids}
     rats = {k: str(v) for k, v in (data.get("rationales") or {}).items() if k in allowed_ids}
     
@@ -223,7 +225,8 @@ def run_per_category_reasoning(
     all_labels: List[Dict[str, Any]],
     lecturer_profile: Optional[str],
     llm_caller: Callable[[str, str, str], str],
-    max_workers: int = 5
+    max_workers: int = 5,
+    model: str = "gpt-4o"
 ) -> Dict[str, CategoryResult]:
     """
     Run reasoning for all categories in parallel.
@@ -234,6 +237,7 @@ def run_per_category_reasoning(
         lecturer_profile: Optional lecturer bio
         llm_caller: Function(system_text, user_text, category) -> str that calls LLM
         max_workers: Max parallel workers (default 5 for 5 categories)
+        model: Model name for telemetry logging
         
     Returns:
         Dict mapping category name to CategoryResult
@@ -271,7 +275,7 @@ def run_per_category_reasoning(
             "kind": "category_reasoning_result",
             "lecture_id": lecture_id,
             "category": category,
-            "model": "gpt-4o",
+            "model": model,
             "chosen_ids": result.chosen_ids,
             "confidence": result.confidence,
             "rationales_count": len(result.rationales or {})

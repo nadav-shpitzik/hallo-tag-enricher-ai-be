@@ -102,8 +102,9 @@ class EnsembleScorer:
             lecture_id
         )
         
-        # Apply top-K limit and return
-        final_suggestions = combined_suggestions[:self.config.top_k_tags]
+        # Apply top-K limit and return (with safe fallback)
+        top_k = getattr(self.config, 'top_k_tags', 50)
+        final_suggestions = combined_suggestions[:top_k]
         
         return final_suggestions
     
