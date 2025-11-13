@@ -6,6 +6,11 @@ import json
 from pydantic import BaseModel, Field, create_model
 from src.logging_utils import StructuredLogger, track_operation, _request_context
 from src.ai_call_logger import AICallLogger
+from src.category_reasoning import (
+    run_per_category_reasoning,
+    category_results_to_suggestions,
+    CATEGORIES
+)
 
 logger = StructuredLogger(__name__)
 ai_call_logger = AICallLogger()
@@ -27,6 +32,9 @@ class ReasoningScorer:
         self.model = model
         self.min_confidence = min_confidence
         self.confidence_scale = confidence_scale  # Calibration factor for over-confident LLMs
+        
+        # Create name -> tag mapping for all tags (populated in score_lecture)
+        self.name_to_tag = {}
     
     def _estimate_llm_tokens(self, messages: List[Dict]) -> tuple[int, int]:
         """Estimate input/output tokens (rough: 1 token ~ 4 chars)."""
@@ -35,6 +43,25 @@ class ReasoningScorer:
         output_tokens = 200  # Conservative estimate for structured output
         return input_tokens, output_tokens
     
+    def _call_category_llm(self, system_text: str, user_text: str, category: str) -> str:
+        """
+        Call LLM for one category. Returns raw text response.
+        This is used by the category reasoning module.
+        """
+        messages = [
+            {"role": "system", "content": system_text},
+            {"role": "user", "content": user_text}
+        ]
+        
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=0.2,
+            response_format={"type": "json_object"}
+        )
+        
+        return response.choices[0].message.content or "{}"
+    
     def score_lecture(
         self,
         lecture: Dict,
@@ -42,210 +69,191 @@ class ReasoningScorer:
         lecturer_profile: Optional[str] = None,
         candidate_tags: Optional[List[Dict]] = None
     ) -> List[Dict]:
-        tags_to_consider = candidate_tags if candidate_tags and len(candidate_tags) > 0 else all_tags
+        # Note: For per-category reasoning, we ignore candidate_tags and use all_tags
+        # This ensures each category sees all its tags for better recall
+        tags_to_consider = all_tags
         
-        logger.info(f"Considering {len(tags_to_consider)} tags for lecture {lecture.get('id')}")
-        if tags_to_consider and len(tags_to_consider) > 0:
-            sample_tag = tags_to_consider[0]
-            logger.info(f"Sample tag structure: {sample_tag}")
+        logger.info(f"Using per-category reasoning with {len(tags_to_consider)} total tags for lecture {lecture.get('id')}")
         
-        prompt = self._build_prompt(lecture, tags_to_consider, lecturer_profile)
-        
-        messages = [
-            {
-                "role": "system",
-                "content": """אתה מומחה בתיוג הרצאות בעברית. תפקידך לקרוא את תוכן ההרצאה ולהציע תגיות רלוונטיות.
-
-## קטגוריות תגיות
-תגיות מחולקות ל-5 קטגוריות, כל אחת משרתת מטרה שונה:
-
-1. **נושא (Topic)**: התוכן המרכזי של ההרצאה - על מה היא עוסקת?
-   - דוגמאות: פילוסופיה, הורות, הייטק, זוגיות, גיאופוליטיקה, כלכלה, חיים בריאים
-
-2. **פרסונה (Persona)**: מי המרצה או איזה סוג דמות מדבר?
-   - דוגמאות: אושיות רשת, מוזיקאים, מקצוענים, גיבורים, מנחי קבוצות
-
-3. **טון (Tone)**: האווירה והגישה הרגשית של ההרצאה
-   - דוגמאות: סיפור אישי, מצחיק, מרגש, פרקטי, מניע לפעולה
-
-4. **פורמט (Format)**: המבנה והסגנון של ההרצאה
-   - דוגמאות: פאנל, שיחה פתוחה, הכשרה מעשית, סיור, הנחיית אירועים
-
-5. **קהל יעד (Audience)**: למי ההרצאה מיועדת?
-   - דוגמאות: הרצאות למורים, הרצאות לנשים, הרצאות להייטק, דוברי אנגלית, הרצאות לגיל השלישי
-
-## כללים חשובים
-1. היה **שמרן** ברמת הביטחון - הצע רק תגיות שהן ממש רלוונטיות
-2. השתמש ברמות ביטחון שונות: 0.60-0.70 לרלוונטיות בסיסית, 0.70-0.80 לרלוונטיות טובה, 0.80-0.95 רק לרלוונטיות מצוינת ומובהקת
-3. התמקד בנושא המרכזי של ההרצאה - אל תציע יותר מדי תגיות
-4. **שים לב לקטגוריה** של כל תגית - זה עוזר להבין את ההקשר והשימוש שלה
-5. השתמש במידע על המרצה כדי להבין טוב יותר את תוכן ההרצאה
-6. תן נימוק ברור בעברית למה התגית מתאימה
-7. אם אין תגיות מתאימות - אל תציע כלום
-8. העדף דיוק (precision) על פני כיסוי (recall) - עדיף פחות תגיות נכונות מאשר תגיות שגויות
-
-## ⚠️ אזהרה קריטית: שימוש מדויק בשמות תגיות
-**חובה להשתמש בשמות התגיות בדיוק כפי שהן מופיעות ברשימה!**
-
-דוגמאות לטעויות נפוצות (אל תעשה כך):
-- ❌ שגוי: "חברה ישראלית" במקום "החברה הישראלית" (חסר ה' הידיעה)
-- ❌ שגוי: "עיתונאות" במקום "מדיה ותקשורת" (המצאת תגית חדשה)
-- ❌ שגוי: "גזענות" במקום התגית הקיימת שמכסה את הנושא
-- ✅ נכון: העתק את השם **תו-תו** מהרשימה למעלה
-
-כל תו משנה - כולל ה' הידיעה, רווחים, ו' החיבור. אם אתה חושב שנושא רלוונטי אבל אין תגית מדויקת - אל תציע כלום.
-
-## הנחיות לפי קטגוריה
-(מקום להנחיות ספציפיות לכל קטגוריה בעתיד)"""
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
+        # Build name -> tag mapping for validation
+        name_to_tag = {}
+        for tag in all_tags:
+            name_he = tag.get('name_he', '').strip()
+            if name_he:
+                name_to_tag[name_he] = tag
+                
+                # Also add synonyms as aliases
+                synonyms = tag.get('synonyms_he', '').strip()
+                if synonyms:
+                    for synonym in synonyms.split(','):
+                        synonym = synonym.strip()
+                        if synonym:
+                            name_to_tag[synonym] = tag
         
         # Get request_id from context for correlation
         request_id = getattr(_request_context, 'request_id', None)
         
-        # Track call timing
-        call_start_time = time.time()
+        # Track overall timing
+        overall_start_time = time.time()
         
         try:
+            # Create a wrapper for category LLM calls that tracks tokens and cost
+            total_input_tokens = 0
+            total_output_tokens = 0
+            category_call_details = []
             
-            with track_operation("reasoning_llm_call", logger, lecture_id=lecture.get('id'), num_tags=len(tags_to_consider)):
-                response = self.client.beta.chat.completions.parse(
+            def llm_caller_with_tracking(system_text: str, user_text: str, category: str) -> str:
+                """Wrapper that calls LLM and tracks usage for each category."""
+                nonlocal total_input_tokens, total_output_tokens
+                
+                call_start = time.time()
+                
+                messages = [
+                    {"role": "system", "content": system_text},
+                    {"role": "user", "content": user_text}
+                ]
+                
+                response = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     temperature=0.2,
-                    response_format=TaggingResponse
+                    response_format={"type": "json_object"}
                 )
                 
-                # Calculate call duration
-                call_duration_ms = (time.time() - call_start_time) * 1000
+                call_duration_ms = (time.time() - call_start) * 1000
                 
-                # Track LLM usage (with fallback estimation)
+                # Track usage
                 usage = response.usage
                 if usage and hasattr(usage, 'prompt_tokens'):
                     input_tokens = usage.prompt_tokens
                     output_tokens = usage.completion_tokens
-                    total_tokens = usage.total_tokens
                 else:
-                    # Estimate when API doesn't provide usage
+                    # Fallback estimation
                     input_tokens, output_tokens = self._estimate_llm_tokens(messages)
-                    total_tokens = input_tokens + output_tokens
                 
-                # Estimate cost (gpt-4o: $5.00/1M input, $15.00/1M output)
-                cost = (input_tokens / 1_000_000 * 5.00) + (output_tokens / 1_000_000 * 15.00)
+                total_input_tokens += input_tokens
+                total_output_tokens += output_tokens
                 
-                logger.info(
-                    "LLM reasoning call completed",
-                    model=self.model,
-                    lecture_id=lecture.get('id'),
-                    num_candidate_tags=len(tags_to_consider),
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    total_tokens=total_tokens,
-                    estimated_cost_usd=round(cost, 6),
-                    usage_source="api" if usage and hasattr(usage, 'prompt_tokens') else "estimated"
+                # Track category details for logging
+                category_call_details.append({
+                    'category': category,
+                    'input_tokens': input_tokens,
+                    'output_tokens': output_tokens,
+                    'duration_ms': call_duration_ms
+                })
+                
+                return response.choices[0].message.content or "{}"
+            
+            # Run per-category reasoning (5 parallel LLM calls)
+            with track_operation("per_category_reasoning", logger, lecture_id=lecture.get('id'), num_tags=len(tags_to_consider)):
+                category_results = run_per_category_reasoning(
+                    lecture=lecture,
+                    all_labels=tags_to_consider,
+                    lecturer_profile=lecturer_profile,
+                    llm_caller=llm_caller_with_tracking
                 )
             
-            result = response.choices[0].message.parsed
+            # Calculate total metrics
+            overall_duration_ms = (time.time() - overall_start_time) * 1000
+            total_tokens = total_input_tokens + total_output_tokens
+            cost = (total_input_tokens / 1_000_000 * 5.00) + (total_output_tokens / 1_000_000 * 15.00)
             
-            # Prepare response content for database logging
-            response_content = None
-            if result:
-                response_content = {
-                    'suggestions': [
-                        {
-                            'tag_name_he': str(sugg.tag_name_he),
-                            'confidence': sugg.confidence,
-                            'rationale_he': sugg.rationale_he
-                        }
-                        for sugg in result.suggestions
-                    ],
-                    'reasoning_summary': result.reasoning_summary
-                }
+            # Count total suggestions across all categories
+            total_suggestions_raw = sum(len(r.chosen_ids) for r in category_results.values())
             
-            # Log AI call to database
-            ai_call_logger.log_call(
-                call_type="reasoning_scorer",
+            logger.info(
+                "Per-category reasoning completed",
                 model=self.model,
-                prompt_messages=messages,
+                lecture_id=lecture.get('id'),
+                num_categories=len(category_results),
+                total_tags=len(tags_to_consider),
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+                total_tokens=total_tokens,
+                estimated_cost_usd=round(cost, 6),
+                total_raw_suggestions=total_suggestions_raw,
+                category_breakdown=[
+                    {
+                        'category': cat,
+                        'tags_selected': len(res.chosen_ids),
+                        'input_tokens': detail['input_tokens'],
+                        'output_tokens': detail['output_tokens']
+                    }
+                    for cat, res in category_results.items()
+                    for detail in category_call_details if detail['category'] == cat
+                ]
+            )
+            
+            # Convert category results to standard suggestions format
+            # Build tags_data dict for conversion
+            tags_data = {tag['tag_id']: tag for tag in all_tags}
+            
+            raw_suggestions = category_results_to_suggestions(category_results, tags_data)
+            
+            # Apply confidence calibration and filtering
+            formatted_suggestions = []
+            for sugg in raw_suggestions:
+                # Apply confidence calibration (LLMs tend to be over-confident)
+                calibrated_confidence = sugg['score'] * self.confidence_scale
+                
+                # Only include if calibrated confidence meets threshold
+                if calibrated_confidence >= self.min_confidence:
+                    formatted_suggestions.append({
+                        'tag_id': sugg['tag_id'],
+                        'tag_name_he': sugg['tag_name_he'],
+                        'score': calibrated_confidence,
+                        'rationale': sugg['rationale'],
+                        'category': sugg['category'],
+                        'model': f'category_reasoning:{self.model}'
+                    })
+            
+            # Log AI calls to database (aggregate all 5 category calls)
+            response_content = {
+                'category_results': {
+                    cat: {
+                        'chosen_ids': res.chosen_ids,
+                        'confidence': res.confidence,
+                        'rationales': res.rationales
+                    }
+                    for cat, res in category_results.items()
+                },
+                'total_suggestions': len(formatted_suggestions),
+                'filtered_from': total_suggestions_raw
+            }
+            
+            ai_call_logger.log_call(
+                call_type="per_category_reasoning",
+                model=self.model,
+                prompt_messages=[{'note': f'5 category calls: {", ".join(CATEGORIES)}'}],
                 response_content=response_content,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
                 total_tokens=total_tokens,
                 estimated_cost_usd=cost,
-                duration_ms=call_duration_ms,
+                duration_ms=overall_duration_ms,
                 status="success",
                 request_id=request_id,
                 lecture_id=lecture.get('id')
             )
             
-            if result is None:
-                logger.warning(f"No parsed result for lecture {lecture.get('id')}")
-                return []
-            
-            # Create name -> tag_id mapping for post-processing
-            name_to_tag = {}
-            for tag in all_tags:
-                name_he = tag.get('name_he', '').strip()
-                if name_he:
-                    name_to_tag[name_he] = tag
-                    
-                    # Also add synonyms as aliases
-                    synonyms = tag.get('synonyms_he', '').strip()
-                    if synonyms:
-                        for synonym in synonyms.split(','):
-                            synonym = synonym.strip()
-                            if synonym:
-                                name_to_tag[synonym] = tag
-            
-            formatted_suggestions = []
-            for sugg in result.suggestions:
-                # Extract tag name (Literal type returns string directly)
-                tag_name = str(sugg.tag_name_he).strip()
-                
-                if tag_name not in name_to_tag:
-                    logger.warning(
-                        f"LLM returned tag name '{tag_name}' which doesn't match any known tag - skipping",
-                        request_id=getattr(_request_context, 'request_id', None)
-                    )
-                    continue
-                
-                matched_tag = name_to_tag[tag_name]
-                tag_id = matched_tag['tag_id']
-                
-                # Apply confidence calibration (LLMs tend to be over-confident)
-                calibrated_confidence = sugg.confidence * self.confidence_scale
-                
-                # Only include if calibrated confidence meets threshold
-                if calibrated_confidence >= self.min_confidence:
-                    formatted_suggestions.append({
-                        'tag_id': tag_id,
-                        'tag_name_he': tag_name,
-                        'score': calibrated_confidence,
-                        'rationale': sugg.rationale_he,
-                        'model': f'reasoning:{self.model}'
-                    })
-            
             logger.info(
-                "Reasoning scoring completed",
+                "Category reasoning scoring completed",
                 lecture_id=lecture.get('id'),
                 num_suggestions=len(formatted_suggestions),
-                filtered_from=len(result.suggestions)
+                filtered_from=total_suggestions_raw,
+                categories_used=list(category_results.keys())
             )
             
             return formatted_suggestions
             
         except Exception as e:
             # Log failed AI call to database
-            call_duration_ms = (time.time() - call_start_time) * 1000 if 'call_start_time' in locals() else 0
+            call_duration_ms = (time.time() - overall_start_time) * 1000 if 'overall_start_time' in locals() else 0
             
             ai_call_logger.log_call(
-                call_type="reasoning_scorer",
+                call_type="per_category_reasoning",
                 model=self.model,
-                prompt_messages=messages,
+                prompt_messages=[{'error': 'Failed during category reasoning execution'}],
                 response_content=None,
                 input_tokens=0,
                 output_tokens=0,
@@ -259,7 +267,7 @@ class ReasoningScorer:
             )
             
             logger.error(
-                "Error in reasoning scorer",
+                "Error in per-category reasoning scorer",
                 lecture_id=lecture.get('id'),
                 error_type=type(e).__name__,
                 error_message=str(e)

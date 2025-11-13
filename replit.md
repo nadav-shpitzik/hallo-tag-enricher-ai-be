@@ -17,10 +17,10 @@ The system provides endpoints for:
 
 ### Scoring Modes
 The API supports four scoring modes, balancing quality, speed, and cost:
-1.  **Ensemble Mode (`"ensemble"`)**: (NEW DEFAULT) Combines reasoning model (80%) and prototype model (20%) with an agreement bonus for highest accuracy. Includes lecturer bio auto-enrichment.
+1.  **Ensemble Mode (`"ensemble"`)**: (DEFAULT) Combines per-category reasoning model (80%) and prototype model (20%) with an agreement bonus for highest accuracy. Uses 5 focused prompts (one per category) for improved recall on long-tail labels. Includes lecturer bio auto-enrichment.
 2.  **Fast Mode (`"fast"`)**: Uses only prototype similarity for the fastest and cheapest suggestions.
 3.  **Full Quality Mode (`"full_quality"`)**: Uses prototype scoring with an LLM arbiter for borderline cases, balancing speed and quality.
-4.  **Reasoning Mode (`"reasoning"`)**: Pure GPT-4o analysis providing highest-quality suggestions with detailed Hebrew rationales and lecturer bio auto-enrichment.
+4.  **Reasoning Mode (`"reasoning"`)**: Uses per-category GPT-4o analysis (5 parallel prompts) providing highest-quality suggestions with detailed Hebrew rationales and lecturer bio auto-enrichment. Optimized for better recall on long-tail labels.
 
 ### Data Flow
 -   **Training Flow**: Client sends training data, API generates embeddings, builds prototypes, calibrates thresholds, and saves versioned prototypes to PostgreSQL.
@@ -40,7 +40,7 @@ The API supports four scoring modes, balancing quality, speed, and cost:
 -   **Forced GPT-4o Model**: System hardcoded to use GPT-4o (not mini) for superior instruction-following and exact tag name matching. All 115 tags are passed to the LLM in reasoning/ensemble modes.
 -   **Exact Tag Matching Prompts**: LLM prompts include explicit Hebrew examples of wrong behavior (missing ה prefix like "חברה ישראלית" vs "החברה הישראלית", invented tags like "עיתונאות" vs "מדיה ותקשורת") to enforce character-by-character matching.
 -   **Lecturer Bio Enrichment**: In reasoning and ensemble modes, GPT-4o is used to search, validate, and cache lecturer bios in PostgreSQL (`lecturer_bios` table) to enrich LLM prompts and improve accuracy.
--   **Category-Aware Prompting**: LLM prompts include explicit definitions for 5 tag categories (Topic, Persona, Tone, Format, Audience) and organize tags by category for improved context understanding. Structure supports future category-specific instructions.
+-   **Per-Category Reasoning**: (NEW) Reasoning scorer now runs 5 focused prompts instead of 1 mixed prompt - one per category (Topic, Persona, Tone, Format, Audience). Each category sees only its relevant tags (~20-30 tags instead of all 115), allowing the model to pay better attention and improve recall on long-tail labels. All 5 calls run in parallel using ThreadPoolExecutor for speed. Results are aggregated and fed into the ensemble scorer with the same weights (80% reasoning, 20% prototype).
 -   **Structured Logging**: Uses structured JSON logging with `request_id` correlation, performance metrics, business metrics, and error context for observability.
 -   **LLM Cost Monitoring**: Tracks token usage and estimates costs for all OpenAI API calls.
 -   **AI Call Tracking**: All ReasoningScorer AI calls are logged to PostgreSQL (`ai_calls` table) with full prompt/response content (JSONB), token counts, costs, duration, and status for auditing and debugging expensive GPT-4o calls.
@@ -49,7 +49,7 @@ The API supports four scoring modes, balancing quality, speed, and cost:
 ### Files Structure
 -   `api_server.py`: Main API server.
 -   `train_prototypes.py`: Standalone training script.
--   `src/`: Contains core modules like `config.py`, `embeddings.py`, `prototype_knn.py`, `prototype_storage.py`, `scorer.py`, `reasoning_scorer.py`, `ensemble_scorer.py`, `llm_arbiter.py`, `lecturer_search.py`, `ai_call_logger.py`, `csv_parser.py`, and `shortlist.py`.
+-   `src/`: Contains core modules like `config.py`, `embeddings.py`, `prototype_knn.py`, `prototype_storage.py`, `scorer.py`, `reasoning_scorer.py`, `category_reasoning.py`, `ensemble_scorer.py`, `llm_arbiter.py`, `lecturer_search.py`, `ai_call_logger.py`, `csv_parser.py`, and `shortlist.py`.
 
 ## External Dependencies
 -   **OpenAI**: Used for `text-embedding-3-large` embeddings and GPT-4o for LLM-based reasoning, arbitration, and lecturer bio enrichment.
