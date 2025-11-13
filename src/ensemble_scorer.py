@@ -2,6 +2,8 @@ import logging
 from typing import List, Dict, Optional, Any
 import numpy as np
 
+from src.telemetry import log_line
+
 logger = logging.getLogger(__name__)
 
 # Margin for guarding agreement bonus - only apply if prototype score is close to threshold
@@ -251,6 +253,25 @@ class EnsembleScorer:
             f"backfill={backfill_triggered}, agreement_bonus={agreement_bonus_count}, "
             f"top3={top3_summary}"
         )
+        
+        # Log telemetry for ensemble result
+        log_line({
+            "kind": "ensemble_result",
+            "lecture_id": lecture_id,
+            "backfill_triggered": backfill_triggered,
+            "agreement_count": agreement_bonus_count,
+            "top3": [
+                {
+                    "label_id": s["tag_id"],
+                    "combined": s["score"],
+                    "r": s["reasoning_score"],
+                    "p": s["prototype_score"],
+                    "pth": s["prototype_threshold"]
+                }
+                for s in combined[:3]
+            ],
+            "total_returned": len(combined)
+        })
         
         return combined
     
