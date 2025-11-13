@@ -1,0 +1,59 @@
+The prompts in this module are well-designed for structured, category-specific reasoning. Here's a breakdown of what's good and where things could improve:
+
+✅ What’s Working Well
+
+1. Narrow Scope per Prompt
+
+Each prompt handles a single category (like "Topic", "Audience", etc.).
+
+This reduces noise and helps the model focus on relevant tags only.
+
+2. Clear JSON Output Format
+
+The format is strict and repeated inside each prompt. That’s important for reliability when parsing responses.
+
+3. Grounding with Input Data
+
+Prompts include lecture title, description, and optionally a bio. This gives the model enough context to reason well.
+
+4. Calibration with Confidence Levels
+
+Tag relevance is expected to be scored, with suggested ranges. That helps create useful downstream filtering.
+
+5. Short Rationales
+
+Asking for 120-character Hebrew justifications encourages the model to explain each choice, which is useful for auditing.
+
+❗Where You Could Improve
+
+1. Reduce Redundant Repetition
+
+Most system prompts repeat the same rules. This could be centralized into one reusable block to make maintenance easier.
+
+2. Be Explicit About Language
+
+It's implied everything is in Hebrew. You could add a reminder to the model that all outputs (including rationales) must be in Hebrew.
+
+3. Better Error Recovery
+
+The regex-based fallback parsing works but is brittle. If you have control over the LLM call, wrapping JSON in special delimiters (like [[[JSON]]]...[[[/JSON]]]) might make parsing more reliable.
+
+4. Prompt Injection Prevention
+
+No current safeguards. You might want to sanitize lecture titles/descriptions before inserting them into the prompt. If user content includes curly braces or looks like JSON, it could break the structure.
+
+Example System Prompt Enhancement (Reusable Base Prompt Idea)
+
+Instead of repeating rules, consider using a shared prefix like:
+
+BASE_RULES = """
+## כללים כלליים (לכל הקטגוריות)
+1. החזר JSON בלבד לפי הסכמה המדויקת.
+2. בחר רק תגיות שמתאימות באמת לתוכן.
+3. אל תנחש. החזר רשימה ריקה אם אין מספיק מידע.
+4. שמור על שמות תגיות מדויקים כולל תחביר.
+5. תן רמת ביטחון והסבר קצר בעברית (עד 120 תווים).
+"""
+
+
+Then just append the category-specific instructions after that.
