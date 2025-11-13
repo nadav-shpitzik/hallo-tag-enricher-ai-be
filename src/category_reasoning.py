@@ -18,7 +18,19 @@ from src.telemetry import log_line
 
 logger = logging.getLogger(__name__)
 
+# Canonical English category names (used internally for consistency with config, thresholds, etc.)
 CATEGORIES = ["Topic", "Persona", "Audience", "Tone", "Format"]
+
+# Bidirectional mapping between English (internal) and Hebrew (data source)
+CATEGORY_MAP_HE_TO_EN = {
+    "נושא": "Topic",
+    "פרסונה": "Persona",
+    "קהל יעד": "Audience",
+    "טון": "Tone",
+    "פורמט": "Format"
+}
+
+CATEGORY_MAP_EN_TO_HE = {v: k for k, v in CATEGORY_MAP_HE_TO_EN.items()}
 
 
 @dataclass
@@ -34,17 +46,26 @@ def group_labels_by_category(labels: List[Dict[str, Any]]) -> Dict[str, List[Dic
     """
     Group labels by category for focused prompting.
     
+    Normalizes Hebrew category names from source data to canonical English names
+    used internally throughout the pipeline.
+    
     Args:
         labels: List of tag dicts with keys: tag_id, name_he, synonyms_he, category
         
     Returns:
-        Dict mapping category name to list of tags in that category
+        Dict mapping English category name to list of tags in that category
     """
     buckets = {c: [] for c in CATEGORIES}
     
     for lb in labels:
-        cat = lb.get("category")
-        if cat and cat in buckets:
+        cat_raw = lb.get("category")
+        if not cat_raw:
+            continue
+            
+        # Normalize Hebrew category to English (or pass through if already English)
+        cat_normalized = CATEGORY_MAP_HE_TO_EN.get(cat_raw, cat_raw)
+        
+        if cat_normalized in buckets:
             syns = lb.get("synonyms_he", "")
             # Handle both string and list formats for synonyms
             if isinstance(syns, str):
@@ -54,11 +75,14 @@ def group_labels_by_category(labels: List[Dict[str, Any]]) -> Dict[str, List[Dic
             else:
                 syn_list = []
             
-            buckets[cat].append({
+            buckets[cat_normalized].append({
                 "tag_id": lb["tag_id"],
                 "name_he": lb.get("name_he", ""),
                 "synonyms_he": syn_list,
             })
+        else:
+            # Log unmapped categories for debugging
+            logger.warning(f"Unmapped category '{cat_raw}' for tag {lb.get('tag_id')}")
     
     return buckets
 
