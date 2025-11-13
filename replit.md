@@ -46,6 +46,13 @@ The API supports four scoring modes, balancing quality, speed, and cost:
     - **Guarded Agreement Bonus**: The +0.15 agreement bonus (applied when both reasoning and prototype agree on a tag) is only granted if the prototype score is strong enough (≥ threshold - 0.03 margin), preventing false confidence from weak prototype matches
     - **Prototype-Only Filtering**: Prototype suggestions that lack reasoning support must meet their category-specific threshold to be included, preserving precision
     - **Comprehensive Logging**: Tracks backfill triggers, agreement bonus counts, and top-3 suggestions per lecture for observability
+-   **Telemetry System**: (NEW) Lean NDJSON-based telemetry for observability and verification:
+    - **Thread-Safe Logging**: `src/telemetry.py` provides thread-safe NDJSON event logging to configurable path (default: `/tmp/tagger.ndjson`)
+    - **Category Tracking**: Each category reasoning result is logged with chosen tag IDs, confidence scores, and rationales count
+    - **Ensemble Tracking**: Each ensemble result is logged with backfill status, agreement bonus count, top-3 suggestions with detailed scores
+    - **Offline Analysis**: `analyze_logs.py` script computes coverage, backfill rate, avg tags, agreement rate, per-category non-empty rates, and flags possible misses
+    - **Human Review**: `sample_human_review.py` script randomly samples results for manual inspection and quality verification
+    - **Zero Performance Impact**: Async file writes with no blocking, purely for observability
 -   **Structured Logging**: Uses structured JSON logging with `request_id` correlation, performance metrics, business metrics, and error context for observability.
 -   **LLM Cost Monitoring**: Tracks token usage and estimates costs for all OpenAI API calls.
 -   **AI Call Tracking**: All ReasoningScorer AI calls are logged to PostgreSQL (`ai_calls` table) with full prompt/response content (JSONB), token counts, costs, duration, and status for auditing and debugging expensive GPT-4o calls.
@@ -54,7 +61,9 @@ The API supports four scoring modes, balancing quality, speed, and cost:
 ### Files Structure
 -   `api_server.py`: Main API server.
 -   `train_prototypes.py`: Standalone training script.
--   `src/`: Contains core modules like `config.py`, `embeddings.py`, `prototype_knn.py`, `prototype_storage.py`, `scorer.py`, `reasoning_scorer.py`, `category_reasoning.py`, `ensemble_scorer.py`, `llm_arbiter.py`, `lecturer_search.py`, `ai_call_logger.py`, `csv_parser.py`, and `shortlist.py`.
+-   `analyze_logs.py`: Offline telemetry analyzer for computing metrics and identifying edge cases.
+-   `sample_human_review.py`: Random sampling tool for human review of tagging results.
+-   `src/`: Contains core modules like `config.py`, `embeddings.py`, `prototype_knn.py`, `prototype_storage.py`, `scorer.py`, `reasoning_scorer.py`, `category_reasoning.py`, `ensemble_scorer.py`, `llm_arbiter.py`, `lecturer_search.py`, `ai_call_logger.py`, `csv_parser.py`, `shortlist.py`, and `telemetry.py`.
 
 ## External Dependencies
 -   **OpenAI**: Used for `text-embedding-3-large` embeddings and GPT-4o for LLM-based reasoning, arbitration, and lecturer bio enrichment.
