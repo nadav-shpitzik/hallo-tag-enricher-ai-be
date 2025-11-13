@@ -38,10 +38,6 @@ externalPort = 80
 localPort = 44347
 externalPort = 3000
 
-[[ports]]
-localPort = 44701
-externalPort = 3001
-
 [deployment]
 run = ["sh", "-c", "python api_server.py"]
 deploymentTarget = "cloudrun"
